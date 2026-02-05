@@ -8,11 +8,15 @@
       "official": false,
       "author": "rukh-debug <talkto-at-rubenk.dev>",
       "description": "RBW Bitwarden/Valutwarden client plugin for Noctalia launcher",
-      "repository": "https://github.com/rukh-debug/bitwarden-rbw-noctalia-launcher",
+      "repository": "https://github.com/rukh-debug/noctalia-unofficial-plugins",
       "minNoctaliaVersion": "3.6.0",
       "license": "MIT",
-      "tags": [],
-      "lastUpdated": "2026-02-05T00:50:27-05:00"
+      "tags": [
+        "Launcher",
+        "Productivity",
+        "Security"
+      ],
+      "lastUpdated": "2026-02-05T00:54:24-05:00"
     }
   ]
 }
