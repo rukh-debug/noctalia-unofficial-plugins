@@ -17,6 +17,23 @@
         "Security"
       ],
       "lastUpdated": "2026-02-05T00:54:24-05:00"
+    },
+    {
+      "id": "mangowc-keymode-submap",
+      "name": "MangoWC Keymode/Submap",
+      "version": "1.0.0",
+      "official": false,
+      "author": "rukh-debug <talkto-at-rubenk.dev>",
+      "description": "Shows the current MangoWC keymode/submap in the bar.",
+      "repository": "https://github.com/rukh-debug/noctalia-unofficial-plugins",
+      "minNoctaliaVersion": "3.6.0",
+      "license": "MIT",
+      "tags": [
+        "Bar",
+        "Compositor",
+        "Status"
+      ],
+      "lastUpdated": "2026-02-06T00:00:00-05:00"
     }
   ]
 }

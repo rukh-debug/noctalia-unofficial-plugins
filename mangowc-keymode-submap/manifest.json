@@ -1,0 +1,30 @@
+{
+  "id": "mangowc-keymode-submap",
+  "name": "MangoWC Keymode/Submap",
+  "version": "1.0.0",
+  "minNoctaliaVersion": "3.6.0",
+  "author": "rukh-debug <talkto-at-rubenk.dev>",
+  "license": "MIT",
+  "repository": "https://github.com/rukh-debug/noctalia-unofficial-plugins",
+  "description": "Shows the current MangoWC keymode/submap in the bar.",
+  "dependencies": {
+    "plugins": []
+  },
+  "tags": [
+    "Bar",
+    "Compositor",
+    "Status"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "settings": "Settings.qml"
+  },
+  "metadata": {
+    "defaultSettings": {
+      "updateIntervalMs": 200,
+      "textColor": "#f4d24f",
+      "maxTextLength": 30,
+      "showDefault": false
+    }
+  }
+}
