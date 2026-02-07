@@ -165,4 +165,37 @@ Item {
             }
         }
     }
+
+    NPopupContextMenu {
+        id: contextMenu
+
+        model: [
+            {
+                "label": "Plugin Settings",
+                "action": "plugin-settings",
+                "icon": "settings"
+            }
+        ]
+
+        onTriggered: action => {
+            contextMenu.close();
+            PanelService.closeContextMenu(screen);
+
+            if (action === "plugin-settings") {
+                BarService.openPluginSettings(screen, pluginApi.manifest);
+            }
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        hoverEnabled: true
+
+        onClicked: function (mouse) {
+            if (mouse.button === Qt.RightButton) {
+                PanelService.showContextMenu(contextMenu, root, screen);
+            }
+        }
+    }
 }
