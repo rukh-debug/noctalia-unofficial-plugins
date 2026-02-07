@@ -19,6 +19,7 @@ A Bitwarden/Vaultwarden password manager integration for Noctalia launcher using
 
 - [rbw](https://github.com/doy/rbw) - Rust Bitwarden CLI client
 - `wtype` - Wayland typing tool for auto-typing passwords
+- `curl` - For downloading favicons (uses Google's favicon service)
 
 ## Installation
 
@@ -103,4 +104,4 @@ Add to your qutebrowser config to open RBW launcher with the current host:
 
 ```python
 config.bind('<Ctrl-Shift-p>', 'spawn qs -c noctalia-shell ipc call plugin:bitwarden-rbw-launcher toggle {url:host}')
-```# bitwarden-rbw-noctalia-launcher
+```

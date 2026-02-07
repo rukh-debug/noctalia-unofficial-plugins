@@ -10,6 +10,17 @@ import qs.Widgets
 
 Item {
     id: root
+    
+    // Favicon cache
+    FaviconCache {
+        id: faviconCache
+        
+        onFaviconUpdated: function(hostname) {
+            if (launcher) {
+                launcher.updateResults();
+            }
+        }
+    }
 
     // Plugin API provided by PluginService
     property var pluginApi: null
@@ -82,10 +93,8 @@ Item {
     }
     
     function getFaviconUrl(uris) {
-        // Favicon downloading disabled - would create too many processes
-        // Using type icons instead
-        // TODO: implement favicon caching 
-        return "";
+        if (!uris || uris.length === 0) return "";
+        return faviconCache.requestFavicon(uris[0]);
     }
     
     function getTypeIcon(type) {
@@ -190,34 +199,36 @@ Item {
         }).map(entry => {
             // Capture entry data by value using an IIFE to avoid closure issues
             return (function(entryId, entryName, entryUser, entryUris, entryType, entryFolder) {
-                var faviconUrl = getFaviconUrl(entryUris);
-                var hasUri = entryUris && entryUris.length > 0;
-                var description = entryUser || "";
-                
-                // Add URI to description if available
-                if (hasUri && entryUris[0]) {
-                    var domain = extractDomain(entryUris[0]);
-                    if (domain) {
-                        description = description ? description + " • " + domain : domain;
-                    }
+            var rawFaviconPath = getFaviconUrl(entryUris);
+            var faviconUrl = rawFaviconPath ? "file://" + rawFaviconPath : "";
+            var hasUri = entryUris && entryUris.length > 0;
+            var description = entryUser || "";
+            
+            // Add URI to description if available
+            if (hasUri && entryUris[0]) {
+                var domain = extractDomain(entryUris[0]);
+                if (domain) {
+                description = description ? description + " • " + domain : domain;
                 }
-                
-                // Add folder to description if in "all" category
-                if (selectedCategory === "all" && entryFolder) {
-                    description = description ? description + " • 📁 " + entryFolder : "📁 " + entryFolder;
+            }
+            
+            // Add folder to description if in "all" category
+            if (selectedCategory === "all" && entryFolder) {
+                description = description ? description + " • 📁 " + entryFolder : "📁 " + entryFolder;
+            }
+            
+            return {
+                "name": entryName,
+                "description": description,
+                "icon": faviconUrl || getTypeIcon(entryType),
+                "isTablerIcon": !faviconUrl,
+                "isImage": !!faviconUrl,
+                "provider": root,
+                "onActivate": function () {
+                root.entryId = entryId;
+                launcher.close();
                 }
-                
-                return {
-                    "name": entryName,
-                    "description": description,
-                    "icon": faviconUrl || getTypeIcon(entryType),
-                    "isTablerIcon": !faviconUrl,
-                    "isImage": !!faviconUrl,
-                    "onActivate": function () {
-                        root.entryId = entryId;
-                        launcher.close();
-                    }
-                };
+            };
             })(entry.id, entry.name, entry.user, entry.uris, entry.type, entry.folder);
         });
         filtered.push({
@@ -244,6 +255,14 @@ Item {
             return 0;
         });
         return filtered;
+    }
+
+    function getImageUrl(modelData) {
+        if( modelData.isImage) {
+            return modelData.icon;
+        } else {
+            return null;
+        }
     }
 
     // Processes
@@ -308,6 +327,10 @@ Item {
             
             // Update categories based on folders
             updateCategories();
+            
+            // Verify existing cache and preload missing favicons
+            faviconCache.verifyEntries(root.entries);
+            faviconCache.preloadFavicons(root.entries);
             
             // Update launcher results if open
             if (launcher) {
