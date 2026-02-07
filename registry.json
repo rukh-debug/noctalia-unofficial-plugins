@@ -19,9 +19,24 @@
       "lastUpdated": "2026-02-06T22:12:24-05:00"
     },
     {
+      "id": "hello-world",
+      "name": "Hello World",
+      "version": "1.0.12",
+      "official": true,
+      "author": "Noctalia Team",
+      "description": "A simple Hello World plugin demonstrating functionalities. For developers only.",
+      "repository": "https://github.com/noctalia-dev/noctalia-plugins",
+      "minNoctaliaVersion": "4.1.2",
+      "license": "MIT",
+      "tags": [
+        "Development"
+      ],
+      "lastUpdated": "2026-02-07T12:51:26-05:00"
+    },
+    {
       "id": "mangowc-keymode-submap",
       "name": "MangoWC Keymode/Submap",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "official": false,
       "author": "rukh-debug <talkto-at-rubenk.dev>",
       "description": "Shows the current MangoWC keymode/submap in the bar.",
@@ -33,7 +48,7 @@
         "Compositor",
         "Status"
       ],
-      "lastUpdated": "2026-02-06T23:33:43-05:00"
+      "lastUpdated": "2026-02-07T12:52:30-05:00"
     }
   ]
 }
