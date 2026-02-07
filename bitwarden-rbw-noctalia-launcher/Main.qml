@@ -12,6 +12,34 @@ Item {
 
     property var pluginApi: null
 
+    Process {
+        id: ipcUnlockProcess
+        running: false
+        command: ["rbw", "unlock"]
+
+        onExited: function (exitCode, _exitStatus) {
+            if (exitCode !== 0) {
+                Logger.e("RBW", "IPC unlock failed with exit code " + exitCode);
+                return;
+            }
+            Logger.i("RBW", "IPC unlock succeeded");
+        }
+    }
+
+    Process {
+        id: ipcLockProcess
+        running: false
+        command: ["rbw", "lock"]
+
+        onExited: function (exitCode, _exitStatus) {
+            if (exitCode !== 0) {
+                Logger.e("RBW", "IPC lock failed with exit code " + exitCode);
+                return;
+            }
+            Logger.i("RBW", "IPC lock succeeded");
+        }
+    }
+
     IpcHandler {
         function toggle(domain: string) {
             if (!pluginApi) return;
@@ -58,13 +86,13 @@ Item {
         }
 
         function lock() {
-            // TODO: implement lock via IPC
             Logger.i("RBW", "Lock command called via IPC");
+            ipcLockProcess.running = true;
         }
 
         function unlock() {
-            // TODO: implement unlock via IPC
             Logger.i("RBW", "Unlock command called via IPC");
+            ipcUnlockProcess.running = true;
         }
 
         target: "plugin:bitwarden-rbw-launcher"

@@ -59,6 +59,22 @@ qs -c noctalia-shell ipc call plugin:bitwarden-rbw-launcher open google
 
 Opens launcher and searches for entries matching "google".
 
+### Lock RBW Vault
+
+```bash
+qs -c noctalia-shell ipc call plugin:bitwarden-rbw-launcher lock
+```
+
+Locks the rbw agent.
+
+### Unlock RBW Vault
+
+```bash
+qs -c noctalia-shell ipc call plugin:bitwarden-rbw-launcher unlock
+```
+
+Unlocks the rbw agent.
+
 ## Keybinding Examples
 
 ### Hyprland
