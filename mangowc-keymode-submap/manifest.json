@@ -1,7 +1,7 @@
 {
   "id": "mangowc-keymode-submap",
   "name": "MangoWC Keymode/Submap",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minNoctaliaVersion": "3.6.0",
   "author": "rukh-debug <talkto-at-rubenk.dev>",
   "license": "MIT",
@@ -16,6 +16,7 @@
     "Status"
   ],
   "entryPoints": {
+    "main": "Main.qml",
     "barWidget": "BarWidget.qml",
     "settings": "Settings.qml"
   },
