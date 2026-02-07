@@ -94,12 +94,16 @@ Item {
         ? applyMaxLength(normalizeMode(keymodeText))
         : ""
 
-    // Content dimensions (visual capsule size)
+    // Base text dimensions (before rotation)
+    readonly property real textWidth: hasKeymode ? content.implicitWidth : 0
+    readonly property real textHeight: hasKeymode ? capsuleHeight : 0
+
+    // Content dimensions (visual capsule size, accounting for rotation)
     readonly property real contentWidth: hasKeymode
-        ? (content.implicitWidth + Style.marginM * 2)
+        ? (isBarVertical ? textHeight : (textWidth + Style.marginM * 2))
         : 0
     readonly property real contentHeight: hasKeymode
-        ? capsuleHeight
+        ? (isBarVertical ? (textWidth + Style.marginM * 2) : textHeight)
         : 0
 
     // Widget dimensions (extends to full bar height for better click area)
@@ -162,6 +166,8 @@ Item {
                 pointSize: barFontSize
                 font.weight: Font.Medium
                 visible: root.displayText !== ""
+                rotation: isBarVertical ? -90 : 0
+                transformOrigin: Item.Center
             }
         }
     }
