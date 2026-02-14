@@ -2,7 +2,7 @@
 
 A Bitwarden/Vaultwarden password manager integration for Noctalia launcher using RBW (Rust Bitwarden CLI).
 
-![Example Screenshot](example.png)
+![Example Screenshot](preview.png)
 
 ## Features
 
