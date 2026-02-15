@@ -1,0 +1,27 @@
+{
+  "id": "openwebui-interface",
+  "name": "OpenWebUI Interface",
+  "version": "0.3.0",
+  "minNoctaliaVersion": "4.1.2",
+  "author": "rukh-debug",
+  "license": "MIT",
+  "repository": "https://github.com/rukh-debug/noctalia-unofficial-plugins",
+  "description": "Quick slide-in chat with OpenWebUI. Features chat sidebar for browsing conversations, model selection, and persistent history.",
+  "tags": ["AI", "Productivity", "Chat"],
+  "entryPoints": {
+    "main": "Main.qml",
+    "panel": "Panel.qml",
+    "settings": "Settings.qml"
+  },
+  "metadata": {
+    "defaultSettings": {
+      "baseUrl": "http://localhost:3000",
+      "apiToken": "",
+      "defaultModel": "openai-api.gpt-5-nano",
+      "panelPosition": "bottom",
+      "panelWidth": 900,
+      "panelHeight": 560,
+      "rememberHistory": true
+    }
+  }
+}

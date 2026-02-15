@@ -34,6 +34,23 @@
         "Status"
       ],
       "lastUpdated": "2026-02-07T12:52:30-05:00"
+    },
+    {
+      "id": "openwebui-interface",
+      "name": "OpenWebUI Interface",
+      "version": "0.3.0",
+      "official": false,
+      "author": "rukh-debug",
+      "description": "Quick slide-in chat with OpenWebUI. Features chat sidebar for browsing conversations, model selection, and persistent history.",
+      "repository": "https://github.com/rukh-debug/noctalia-unofficial-plugins",
+      "minNoctaliaVersion": "4.1.2",
+      "license": "MIT",
+      "tags": [
+        "AI",
+        "Productivity",
+        "Chat"
+      ],
+      "lastUpdated": "2026-02-15T00:00:00-05:00"
     }
   ]
 }
