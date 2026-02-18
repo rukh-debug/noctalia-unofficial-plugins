@@ -155,7 +155,10 @@ RowLayout {
     }
     
     NText {
-      text: chatData ? (chatData.title || "Untitled Chat") : "OpenWebUI"
+      text: {
+        var t = chatData ? (chatData.title || "Untitled Chat") : "OpenWebUI";
+        return t.length > 20 ? t.substring(0, 20) + "..." : t;
+      }
       font.pointSize: Style.fontSizeM
       font.weight: Font.Medium
       color: Color.mOnSurface

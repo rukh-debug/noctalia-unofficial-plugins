@@ -1,7 +1,7 @@
 {
   "id": "openwebui-interface",
   "name": "OpenWebUI Interface",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "minNoctaliaVersion": "4.1.2",
   "author": "rukh-debug",
   "license": "MIT",

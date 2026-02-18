@@ -144,7 +144,10 @@ Rectangle {
                             }
                             
                             NText {
-                                text: modelData.title || "Untitled Chat"
+                                text: {
+                                    var t = modelData.title || "Untitled Chat";
+                                    return t.length > 20 ? t.substring(0, 20) + "..." : t;
+                                }
                                 font.pointSize: Style.fontSizeS
                                 font.weight: root.currentChatId === modelData.id ? Font.Medium : Font.Normal
                                 color: {
