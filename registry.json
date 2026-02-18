@@ -19,6 +19,21 @@
       "lastUpdated": "2026-02-07T15:59:50-05:00"
     },
     {
+      "id": "hello-world",
+      "name": "Hello World",
+      "version": "1.0.12",
+      "official": true,
+      "author": "Noctalia Team",
+      "description": "A simple Hello World plugin demonstrating functionalities. For developers only.",
+      "repository": "https://github.com/noctalia-dev/noctalia-plugins",
+      "minNoctaliaVersion": "4.1.2",
+      "license": "MIT",
+      "tags": [
+        "Development"
+      ],
+      "lastUpdated": "2026-02-15T08:21:07-05:00"
+    },
+    {
       "id": "mangowc-keymode-submap",
       "name": "MangoWC Keymode/Submap",
       "version": "1.2.0",
@@ -38,7 +53,7 @@
     {
       "id": "openwebui-interface",
       "name": "OpenWebUI Interface",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "official": false,
       "author": "rukh-debug",
       "description": "Quick slide-in chat with OpenWebUI. Features chat sidebar for browsing conversations, model selection, and persistent history.",
@@ -50,7 +65,7 @@
         "Productivity",
         "Chat"
       ],
-      "lastUpdated": "2026-02-15T00:00:00-05:00"
+      "lastUpdated": "2026-02-18T07:15:50-05:00"
     }
   ]
 }
