@@ -4,40 +4,60 @@ import Quickshell
 import qs.Commons
 import qs.Widgets
 
-Rectangle {
+NIconButton {
   id: root
 
-  // Plugin API (injected by PluginService)
   property var pluginApi: null
-
-  // Required properties for bar widgets
   property ShellScreen screen
   property string widgetId: ""
   property string section: ""
+  property bool wasGenerating: false
 
-  readonly property var mainInstance: pluginApi?.mainInstance
-  readonly property bool isGenerating: mainInstance?.isGenerating || false
+  readonly property var mainInstance: pluginApi && pluginApi.mainInstance
+  readonly property bool isGenerating: mainInstance && mainInstance.isGenerating || false
 
-  implicitWidth: row.implicitWidth + Style.marginM * 2
-  implicitHeight: Style.barHeight
+  baseSize: Style.getCapsuleHeightForScreen(screen ? screen.name : "")
+  applyUiScale: false
+  customRadius: Style.radiusL
 
-  color: Style.capsuleColor
-  radius: Style.radiusM
+  icon: root.isGenerating ? "loader-2" : "sparkles"
 
-  RowLayout {
-    id: row
-    anchors.centerIn: parent
-    spacing: Style.marginS
+  colorBg: Style.capsuleColor
+  colorFg: Color.mPrimary
+  colorBorder: Style.capsuleBorderColor
+  border.width: Style.capsuleBorderWidth
 
-    NIcon {
-      icon: root.isGenerating ? "loader-2" : "sparkles"
-      color: Color.mPrimary
+  tooltipText: root.isGenerating ? "Generating..." : "Open OpenWebUI"
+
+  onClicked: {
+    if (pluginApi) {
+      pluginApi.openPanel(screen)
+    }
+  }
+
+  RotationAnimation on rotation {
+    from: 0
+    to: 360
+    duration: 1000
+    loops: Animation.Infinite
+    running: root.isGenerating
+  }
+
+  onIsGeneratingChanged: {
+    if (!isGenerating) {
+      rotation = 0
     }
 
-    NText {
-      text: "OpenWebUI"
-      color: Color.mOnSurface
-      pointSize: Style.fontSizeS
+    if (wasGenerating && !isGenerating) {
+      if (pluginApi) {
+        pluginApi.openPanel(screen)
+      }
     }
+
+    wasGenerating = isGenerating
+  }
+
+  onRightClicked: {
+      PanelService.showContextMenu(contextMenu, root, screen);
   }
 }

@@ -170,11 +170,11 @@ Item {
                        Quickshell.clipboardText = text;
                        ToastService.showNotice("Copied to clipboard");
                     }
-                    onCompleted: {
+                    Component.onCompleted: {
                         if (!message.read) {
                             // If near bottom (user is viewing latest messages)
                             if (chatFlickable.isNearBottom) {
-                                message.read = true
+                                pluginApi.mainInstance.markMessageRead(message.id)
                             }
                         }
                     }

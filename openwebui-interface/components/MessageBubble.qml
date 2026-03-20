@@ -78,16 +78,16 @@ Item {
                 id: bubbleHoverArea
                 anchors.fill: parent
                 hoverEnabled: true
-                acceptedButtons: Qt.NoButton
+                acceptedButtons: Qt.AllButtons
                 onContainsMouseChanged: {
                     root.isHovered = containsMouse
                     if (containsMouse && !message.read) {
-                        message.read = true
+                        pluginApi.mainInstance.markMessageRead(message.id)
                     }
                 }
                 onClicked: {
-                    if (!message.read) {
-                        message.read = true
+                  if (!message.read) {
+                        pluginApi.mainInstance.markMessageRead(message.id)
                     }
                 }
 

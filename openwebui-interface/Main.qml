@@ -470,6 +470,16 @@ Item {
     return "New Chat";
   }
 
+  function markMessageRead(id) {
+    for (let i = 0; i < messages.length; i++) {
+        if (messages[i].id === id) {
+            messages[i].read = true
+            break
+        }
+    }
+    messages = [...messages]
+  }
+
   function generateAndUpdateTitleRemote() {
     if (!baseUrl || !apiToken) return;
     if (!currentChatId) {
