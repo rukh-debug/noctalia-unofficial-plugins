@@ -9,7 +9,6 @@ ColumnLayout {
   id: root
   property var pluginApi: null
 
-  // Simplify property bindings to match Hello World pattern
   property string valueBaseUrl: pluginApi?.pluginSettings?.baseUrl || pluginApi?.manifest?.metadata?.defaultSettings?.baseUrl || ""
   property string valueToken: pluginApi?.pluginSettings?.apiToken || pluginApi?.manifest?.metadata?.defaultSettings?.apiToken || ""
   property string valueModel: pluginApi?.pluginSettings?.defaultModel || pluginApi?.manifest?.metadata?.defaultSettings?.defaultModel || ""
@@ -17,6 +16,7 @@ ColumnLayout {
   property double valueWidth: pluginApi?.pluginSettings?.panelWidth || pluginApi?.manifest?.metadata?.defaultSettings?.panelWidth || 640
   property double valueHeight: pluginApi?.pluginSettings?.panelHeight || pluginApi?.manifest?.metadata?.defaultSettings?.panelHeight || 560
   property bool valueRememberHistory: pluginApi?.pluginSettings?.rememberHistory ?? pluginApi?.manifest?.metadata?.defaultSettings?.rememberHistory ?? true
+  property bool valueReopenOnSameMonitor: pluginApi?.pluginSettings?.openAfterResponse ?? pluginApi?.manifest?.metadata?.defaultSettings?.openAfterResponse ?? true
 
   readonly property bool isAuthenticated: valueToken && valueToken.trim() !== ""
 
@@ -32,7 +32,7 @@ ColumnLayout {
   property bool fetchingModels: false
   property string modelsError: ""
 
-  spacing: Style.marginM
+  spacing: Style.marginL
 
   Component.onCompleted: {
     Logger.i("OpenWebUI", "Settings UI loaded");
@@ -41,7 +41,6 @@ ColumnLayout {
     }
   }
 
-  // Fetch models when authentication state changes
   onIsAuthenticatedChanged: {
     if (isAuthenticated) {
       Qt.callLater(fetchModels);
@@ -71,22 +70,18 @@ ColumnLayout {
             var resp = JSON.parse(xhr.responseText);
             var models = [];
             
-            // Handle OpenAI-style response
             if (resp.data && Array.isArray(resp.data)) {
               models = resp.data.map(function(m) { return m.id || m.name || m; });
             } 
-            // Handle direct array
             else if (Array.isArray(resp)) {
               models = resp.map(function(m) { return m.id || m.name || m; });
             }
-            // Handle models property
             else if (resp.models && Array.isArray(resp.models)) {
               models = resp.models.map(function(m) { return m.id || m.name || m; });
             }
             
             availableModels = models;
             
-            // Set first model as default if current model is empty
             if (models.length > 0 && !valueModel) {
               valueModel = models[0];
             }
@@ -110,126 +105,346 @@ ColumnLayout {
   }
 
   function performLogin() {
-      if (!authUrlInput) { ToastService.showError("URL required"); return; }
-      if (!authEmailInput || !authPassInput) { ToastService.showError("Email & Password required"); return; }
+    if (!authUrlInput) { ToastService.showError("URL required"); return; }
+    if (!authEmailInput || !authPassInput) { ToastService.showError("Email & Password required"); return; }
 
-      loggingIn = true;
-      var cleanUrl = authUrlInput.replace(/\/+$/, "");
-      var xhr = new XMLHttpRequest();
-      xhr.open("POST", cleanUrl + "/api/v1/auths/signin");
-      xhr.setRequestHeader("Content-Type", "application/json");
-      
-      xhr.onreadystatechange = function() {
-          if (xhr.readyState === XMLHttpRequest.DONE) {
-              loggingIn = false;
-              if (xhr.status === 200) {
-                  try {
-                      var resp = JSON.parse(xhr.responseText);
-                      if (resp && resp.token) {
-                          if (pluginApi) {
-                              pluginApi.pluginSettings.baseUrl = cleanUrl;
-                              pluginApi.pluginSettings.apiToken = resp.token;
-                              root.valueBaseUrl = cleanUrl;
-                              root.valueToken = resp.token;
-                              pluginApi.saveSettings();
-                              ToastService.showNotice("Logged in successfully");
-                              authPassInput = "";
-                              authEmailInput = "";
-                          }
-                      } else {
-                          ToastService.showError("Login failed: No token returned");
-                      }
-                  } catch (e) {
-                      ToastService.showError("Login failed: Invalid response");
-                  }
-              } else {
-                  ToastService.showError("Login failed: " + xhr.status + " " + xhr.statusText);
+    loggingIn = true;
+    var cleanUrl = authUrlInput.replace(/\/+$/, "");
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", cleanUrl + "/api/v1/auths/signin");
+    xhr.setRequestHeader("Content-Type", "application/json");
+    
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState === XMLHttpRequest.DONE) {
+        loggingIn = false;
+        if (xhr.status === 200) {
+          try {
+            var resp = JSON.parse(xhr.responseText);
+            if (resp && resp.token) {
+              if (pluginApi) {
+                pluginApi.pluginSettings.baseUrl = cleanUrl;
+                pluginApi.pluginSettings.apiToken = resp.token;
+                root.valueBaseUrl = cleanUrl;
+                root.valueToken = resp.token;
+                pluginApi.saveSettings();
+                ToastService.showNotice("Logged in successfully");
+                authPassInput = "";
+                authEmailInput = "";
               }
+            } else {
+              ToastService.showError("Login failed: No token returned");
+            }
+          } catch (e) {
+            ToastService.showError("Login failed: Invalid response");
           }
+        } else {
+          ToastService.showError("Login failed: " + xhr.status + " " + xhr.statusText);
+        }
       }
-      xhr.onerror = function() {
-          loggingIn = false;
-          ToastService.showError("Network error. Check URL.");
-      }
-      xhr.send(JSON.stringify({email: authEmailInput, password: authPassInput}));
+    }
+    xhr.onerror = function() {
+      loggingIn = false;
+      ToastService.showError("Network error. Check URL.");
+    }
+    xhr.send(JSON.stringify({email: authEmailInput, password: authPassInput}));
   }
 
   function saveManualKey() {
-      if (!authUrlInput) { ToastService.showError("URL required"); return; }
-      if (!authKeyInput) { ToastService.showError("API Key required"); return; }
-      
-      if (pluginApi) {
-          var cleanUrl = authUrlInput.replace(/\/+$/, "");
-          pluginApi.pluginSettings.baseUrl = cleanUrl;
-          pluginApi.pluginSettings.apiToken = authKeyInput.trim();
-          root.valueBaseUrl = cleanUrl;
-          root.valueToken = authKeyInput.trim();
-          pluginApi.saveSettings();
-          ToastService.showNotice("API Key saved");
-          authKeyInput = "";
-      }
+    if (!authUrlInput) { ToastService.showError("URL required"); return; }
+    if (!authKeyInput) { ToastService.showError("API Key required"); return; }
+    
+    if (pluginApi) {
+      var cleanUrl = authUrlInput.replace(/\/+$/, "");
+      pluginApi.pluginSettings.baseUrl = cleanUrl;
+      pluginApi.pluginSettings.apiToken = authKeyInput.trim();
+      root.valueBaseUrl = cleanUrl;
+      root.valueToken = authKeyInput.trim();
+      pluginApi.saveSettings();
+      ToastService.showNotice("API Key saved");
+      authKeyInput = "";
+    }
   }
 
   function logout() {
-      if (pluginApi) {
-          pluginApi.pluginSettings.apiToken = "";
-          root.valueToken = "";
-          pluginApi.saveSettings();
-          ToastService.showNotice("Logged out successfully");
-      }
+    if (pluginApi) {
+      pluginApi.pluginSettings.apiToken = "";
+      root.valueToken = "";
+      pluginApi.saveSettings();
+      ToastService.showNotice("Logged out successfully");
+    }
   }
 
-  // Authentication Status Section
-  Rectangle {
-    Layout.fillWidth: true
-    height: authStatusContent.implicitHeight + Style.marginM * 2
-    color: isAuthenticated ? Qt.rgba(0, 0.8, 0.2, 0.15) : Qt.rgba(0.8, 0.2, 0, 0.15)
-    radius: Style.radiusM
-    border.color: isAuthenticated ? Qt.rgba(0, 0.8, 0.2, 0.4) : Qt.rgba(0.8, 0.2, 0, 0.4)
-    border.width: 1
+  // ─── Reusable: Section Card ───
+  component SettingsCard: Rectangle {
+    id: card
+    default property alias cardContent: cardColumn.data
+    property string title: ""
 
-    RowLayout {
-      id: authStatusContent
+    Layout.fillWidth: true
+    implicitHeight: cardInnerCol.implicitHeight + Style.marginM * 2
+    color: Qt.alpha(Color.mSurfaceVariant, 0.35)
+    radius: Style.radiusM
+    border.width: 1
+    border.color: Qt.alpha(Style.capsuleBorderColor, 0.5)
+
+    ColumnLayout {
+      id: cardInnerCol
       anchors.fill: parent
       anchors.margins: Style.marginM
       spacing: Style.marginM
 
-      // Status indicator circle
-      Rectangle {
-        Layout.preferredWidth: 16
-        Layout.preferredHeight: 16
-        radius: 8
-        color: isAuthenticated ? Qt.rgba(0, 0.8, 0.2, 1) : Qt.rgba(0.8, 0.2, 0, 1)
-        border.color: isAuthenticated ? Qt.rgba(0, 1, 0.2, 1) : Qt.rgba(1, 0.2, 0, 1)
-        border.width: 2
+      NText {
+        text: card.title
+        font.pointSize: Style.fontSizeM
+        font.weight: Font.DemiBold
+        color: Color.mOnSurface
+        visible: card.title !== ""
+      }
 
-        // Pulse animation for logged in state
-        SequentialAnimation on scale {
+      ColumnLayout {
+        id: cardColumn
+        Layout.fillWidth: true
+        spacing: Style.marginS
+      }
+    }
+  }
+
+  // ─── Reusable: Styled Text Field ───
+  component StyledField: Rectangle {
+    id: fieldRoot
+    property alias text: fieldInput.text
+    property alias echoMode: fieldInput.echoMode
+    property alias passwordCharacter: fieldInput.passwordCharacter
+    property string placeholder: ""
+    signal accepted()
+    signal textEdited(string newText)
+
+    Layout.fillWidth: true
+    height: 40
+    color: Color.mSurfaceVariant
+    radius: Style.radiusS
+    border.width: fieldInput.activeFocus ? 2 : 1
+    border.color: fieldInput.activeFocus ? Color.mPrimary : Qt.alpha(Style.capsuleBorderColor, 0.5)
+
+    Behavior on border.color { ColorAnimation { duration: 150 } }
+
+    TextInput {
+      id: fieldInput
+      anchors.fill: parent
+      anchors.leftMargin: Style.marginS + 2
+      anchors.rightMargin: Style.marginS + 2
+      anchors.topMargin: Style.marginXS
+      anchors.bottomMargin: Style.marginXS
+      color: Color.mOnSurface
+      font.pointSize: Style.fontSizeS
+      verticalAlignment: TextInput.AlignVCenter
+      clip: true
+      onTextChanged: fieldRoot.textEdited(text)
+      onAccepted: fieldRoot.accepted()
+    }
+
+    Text {
+      anchors.fill: fieldInput
+      text: fieldRoot.placeholder
+      color: Qt.alpha(Color.mOnSurfaceVariant, 0.5)
+      font.pointSize: Style.fontSizeS
+      verticalAlignment: Text.AlignVCenter
+      visible: !fieldInput.text && !fieldInput.activeFocus
+    }
+  }
+
+  // ─── Reusable: Setting Row (label + control) ───
+  component SettingRow: RowLayout {
+    property string label: ""
+    property string description: ""
+    default property alias control: controlSlot.data
+
+    Layout.fillWidth: true
+    spacing: Style.marginM
+
+    ColumnLayout {
+      Layout.fillWidth: true
+      spacing: 2
+
+      NText {
+        text: parent.parent.label
+        font.pointSize: Style.fontSizeS
+        font.weight: Font.Medium
+        color: Color.mOnSurface
+      }
+
+      NText {
+        text: parent.parent.description
+        font.pointSize: Style.fontSizeXS
+        color: Color.mOnSurfaceVariant
+        visible: parent.parent.description !== ""
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+      }
+    }
+
+    Item {
+      id: controlSlot
+      Layout.alignment: Qt.AlignVCenter
+      implicitWidth: childrenRect.width
+      implicitHeight: childrenRect.height
+    }
+  }
+
+  // ─── Reusable: Styled ComboBox ───
+  component StyledComboBox: ComboBox {
+    id: styledCombo
+    Layout.fillWidth: true
+    implicitHeight: 40
+
+    background: Rectangle {
+      color: Color.mSurfaceVariant
+      radius: Style.radiusS
+      border.width: styledCombo.activeFocus || styledCombo.popup.visible ? 2 : 1
+      border.color: styledCombo.activeFocus || styledCombo.popup.visible ? Color.mPrimary : Qt.alpha(Style.capsuleBorderColor, 0.5)
+
+      Behavior on border.color { ColorAnimation { duration: 150 } }
+    }
+
+    contentItem: NText {
+      leftPadding: Style.marginS + 2
+      rightPadding: styledCombo.indicator.width + Style.marginS
+      text: styledCombo.displayText
+      font.pointSize: Style.fontSizeS
+      color: Color.mOnSurface
+      verticalAlignment: Text.AlignVCenter
+      elide: Text.ElideRight
+    }
+
+    indicator: NIcon {
+      x: styledCombo.width - width - Style.marginS
+      y: (styledCombo.height - height) / 2
+      icon: "chevron-down"
+      pointSize: Style.fontSizeXS
+      color: Color.mOnSurfaceVariant
+
+      Behavior on rotation { NumberAnimation { duration: 200 } }
+      rotation: styledCombo.popup.visible ? 180 : 0
+    }
+
+    popup: Popup {
+      y: styledCombo.height + 4
+      width: styledCombo.width
+      implicitHeight: Math.min(popupListView.contentHeight + 8, 300)
+      padding: 4
+
+      background: Rectangle {
+        // Use surfaceVariant with full opacity so it's never transparent
+        color: Qt.lighter(Color.mSurfaceVariant, 1.1)
+        radius: Style.radiusS
+        border.width: 1
+        border.color: Qt.alpha(Style.capsuleBorderColor, 0.8)
+
+        // Subtle shadow via a darker rect behind
+        Rectangle {
+          anchors.fill: parent
+          anchors.margins: -1
+          z: -1
+          radius: parent.radius + 1
+          color: Qt.alpha("#000000", 0.25)
+        }
+      }
+
+      contentItem: ListView {
+        id: popupListView
+        clip: true
+        implicitHeight: contentHeight
+        model: styledCombo.popup.visible ? styledCombo.delegateModel : null
+        currentIndex: styledCombo.highlightedIndex
+        boundsBehavior: Flickable.StopAtBounds
+
+        ScrollBar.vertical: ScrollBar {
+          policy: popupListView.contentHeight > 292 ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+          width: 6
+
+          contentItem: Rectangle {
+            implicitWidth: 4
+            radius: 2
+            color: Qt.alpha(Color.mOnSurfaceVariant, 0.4)
+          }
+        }
+      }
+    }
+
+    delegate: ItemDelegate {
+      width: styledCombo.width - 8
+      height: 36
+      highlighted: styledCombo.highlightedIndex === index
+
+      contentItem: NText {
+        text: modelData
+        font.pointSize: Style.fontSizeS
+        color: highlighted ? Color.mPrimary : Color.mOnSurface
+        verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
+        leftPadding: Style.marginS
+      }
+
+      background: Rectangle {
+        color: highlighted ? Qt.alpha(Color.mPrimary, 0.1) : (hovered ? Qt.alpha(Color.mOnSurface, 0.05) : "transparent")
+        radius: Style.radiusXS
+
+        Behavior on color { ColorAnimation { duration: 100 } }
+      }
+    }
+  }
+
+
+  // ═══════════════════════════════════════════
+  //  Authentication Status
+  // ═══════════════════════════════════════════
+
+  Rectangle {
+    Layout.fillWidth: true
+    implicitHeight: authStatusRow.implicitHeight + Style.marginM * 2
+    color: isAuthenticated ? Qt.rgba(0, 0.8, 0.2, 0.08) : Qt.rgba(0.8, 0.2, 0, 0.08)
+    radius: Style.radiusM
+    border.color: isAuthenticated ? Qt.rgba(0, 0.8, 0.2, 0.25) : Qt.rgba(0.8, 0.2, 0, 0.25)
+    border.width: 1
+
+    RowLayout {
+      id: authStatusRow
+      anchors.fill: parent
+      anchors.margins: Style.marginM
+      spacing: Style.marginS
+
+      Rectangle {
+        Layout.preferredWidth: 10
+        Layout.preferredHeight: 10
+        radius: 5
+        color: isAuthenticated ? Qt.rgba(0.2, 0.85, 0.4, 1) : Qt.rgba(0.85, 0.25, 0.1, 1)
+
+        SequentialAnimation on opacity {
           running: isAuthenticated
           loops: Animation.Infinite
-          NumberAnimation { from: 1.0; to: 1.2; duration: 1000; easing.type: Easing.InOutQuad }
-          NumberAnimation { from: 1.2; to: 1.0; duration: 1000; easing.type: Easing.InOutQuad }
+          NumberAnimation { from: 1.0; to: 0.4; duration: 1200; easing.type: Easing.InOutSine }
+          NumberAnimation { from: 0.4; to: 1.0; duration: 1200; easing.type: Easing.InOutSine }
         }
       }
 
       ColumnLayout {
         Layout.fillWidth: true
-        spacing: Style.marginXXS
+        spacing: 2
 
         NText {
-          text: isAuthenticated ? "Authentication Status: Logged In" : "Authentication Status: Not Authenticated"
-          font.pointSize: Style.fontSizeM
-          font.weight: Font.Bold
-          color: isAuthenticated ? Qt.rgba(0, 0.9, 0.2, 1) : Qt.rgba(0.9, 0.2, 0, 1)
+          text: isAuthenticated ? "Connected" : "Not Connected"
+          font.pointSize: Style.fontSizeS
+          font.weight: Font.DemiBold
+          color: isAuthenticated ? Qt.rgba(0.2, 0.85, 0.4, 1) : Qt.rgba(0.85, 0.25, 0.1, 1)
         }
 
         NText {
           text: isAuthenticated 
-                  ? "Connected to: " + (valueBaseUrl || "Unknown")
-                  : "Please authenticate to your OpenWebUI account"
-          font.pointSize: Style.fontSizeS
+                  ? valueBaseUrl || "Unknown server"
+                  : "Authenticate to get started"
+          font.pointSize: Style.fontSizeXS
           color: Color.mOnSurfaceVariant
-          wrapMode: Text.Wrap
+          elide: Text.ElideMiddle
           Layout.fillWidth: true
         }
       }
@@ -242,7 +457,10 @@ ColumnLayout {
     }
   }
 
-  // Show login form when not authenticated
+  // ═══════════════════════════════════════════
+  //  Login Form (when not authenticated)
+  // ═══════════════════════════════════════════
+
   ColumnLayout {
     Layout.fillWidth: true
     spacing: Style.marginM
@@ -250,202 +468,143 @@ ColumnLayout {
 
     NIcon {
       icon: "login"
-      pointSize: 48
+      pointSize: 40
       color: Color.mPrimary
       Layout.alignment: Qt.AlignHCenter
     }
 
     NText {
       text: "Connect to OpenWebUI"
-      font.pointSize: Style.fontSizeXL
-      font.weight: Font.Bold
-      Layout.alignment: Qt.AlignHCenter
-      color: Color.mOnSurface
-    }
-
-    ColumnLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginXXS
-      
-      NText {
-        text: "Server URL"
-        font.pointSize: Style.fontSizeS
-        color: Color.mOnSurfaceVariant
-      }
-      
-      Rectangle {
-        Layout.fillWidth: true
-        height: 36
-        color: Color.mSurfaceVariant
-        radius: Style.radiusS
-        border.width: 0
-        
-        TextInput {
-          anchors.fill: parent
-          anchors.margins: Style.marginS
-          text: authUrlInput
-          color: Color.mOnSurface
-          font.pointSize: Style.fontSizeS
-          verticalAlignment: TextInput.AlignVCenter
-          clip: true
-          onTextChanged: authUrlInput = text
-        }
-      }
-    }
-
-    ColumnLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginXXS
-      
-      NText {
-        text: "Email"
-        font.pointSize: Style.fontSizeS
-        color: Color.mOnSurfaceVariant
-      }
-      
-      Rectangle {
-        Layout.fillWidth: true
-        height: 36
-        color: Color.mSurfaceVariant
-        radius: Style.radiusS
-        border.width: 0
-        
-        TextInput {
-          anchors.fill: parent
-          anchors.margins: Style.marginS
-          text: authEmailInput
-          color: Color.mOnSurface
-          font.pointSize: Style.fontSizeS
-          verticalAlignment: TextInput.AlignVCenter
-          clip: true
-          onTextChanged: authEmailInput = text
-        }
-      }
-    }
-
-    ColumnLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginXXS
-      
-      NText {
-        text: "Password"
-        font.pointSize: Style.fontSizeS
-        color: Color.mOnSurfaceVariant
-      }
-      
-      Rectangle {
-        Layout.fillWidth: true
-        height: 36
-        color: Color.mSurfaceVariant
-        radius: Style.radiusS
-        border.width: 0
-        
-        TextInput {
-          anchors.fill: parent
-          anchors.margins: Style.marginS
-          text: authPassInput
-          echoMode: TextInput.Password
-          passwordCharacter: "•"
-          color: Color.mOnSurface
-          font.pointSize: Style.fontSizeS
-          verticalAlignment: TextInput.AlignVCenter
-          clip: true
-          onTextChanged: authPassInput = text
-          onAccepted: performLogin()
-        }
-      }
-    }
-
-    NButton {
-      text: loggingIn ? "Logging in..." : "Log In"
-      enabled: !loggingIn
-      Layout.fillWidth: true
-      Layout.topMargin: Style.marginS
-      onClicked: performLogin()
-    }
-
-    Rectangle {
-      Layout.fillWidth: true
-      height: 1
-      color: Style.capsuleBorderColor
-      Layout.margins: Style.marginS
-    }
-
-    NText {
-      text: "Or enter API Key manually"
-      font.pointSize: Style.fontSizeXS
-      color: Color.mOnSurfaceVariant
-      Layout.alignment: Qt.AlignHCenter
-    }
-
-    Rectangle {
-      Layout.fillWidth: true
-      height: 36
-      color: Color.mSurfaceVariant
-      radius: Style.radiusS
-      border.width: 0
-      
-      TextInput {
-          id: apiKeyInput
-          anchors.fill: parent
-          anchors.margins: Style.marginS
-          text: authKeyInput
-          echoMode: TextInput.Password
-          passwordCharacter: "•"
-          color: Color.mOnSurface
-          font.pointSize: Style.fontSizeS
-          verticalAlignment: TextInput.AlignVCenter
-          clip: true
-          onTextChanged: authKeyInput = text
-        }
-        
-        Text {
-          anchors.fill: parent
-          anchors.margins: Style.marginS
-          text: "sk-..."
-          color: Color.mOnSurfaceVariant
-          font.pointSize: Style.fontSizeS
-          verticalAlignment: Text.AlignVCenter
-          visible: !apiKeyInput.text && !apiKeyInput.activeFocus
-          opacity: 0.7
-        }
-      }
-
-    NButton {
-      text: "Save API Key"
-      Layout.fillWidth: true
-      Layout.topMargin: Style.marginS
-      onClicked: saveManualKey()
-    }
-  }
-
-  // Show configuration options when authenticated
-  ColumnLayout {
-    Layout.fillWidth: true
-    spacing: Style.marginM
-    visible: isAuthenticated
-
-    NText {
-      text: "Chat Configuration"
       font.pointSize: Style.fontSizeL
       font.weight: Font.Bold
+      Layout.alignment: Qt.AlignHCenter
       color: Color.mOnSurface
     }
 
-    RowLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginM
+    SettingsCard {
+      title: "Sign In"
 
       ColumnLayout {
         Layout.fillWidth: true
         spacing: Style.marginXXS
 
-        NLabel {
-          label: "Default Model"
-          description: "Model to use for chat requests"
+        NText {
+          text: "Server URL"
+          font.pointSize: Style.fontSizeXS
+          font.weight: Font.Medium
+          color: Color.mOnSurfaceVariant
         }
 
-        ComboBox {
+        StyledField {
+          text: authUrlInput
+          placeholder: "http://localhost:3000"
+          onTextEdited: (t) => authUrlInput = t
+        }
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginXXS
+
+        NText {
+          text: "Email"
+          font.pointSize: Style.fontSizeXS
+          font.weight: Font.Medium
+          color: Color.mOnSurfaceVariant
+        }
+
+        StyledField {
+          text: authEmailInput
+          placeholder: "user@example.com"
+          onTextEdited: (t) => authEmailInput = t
+        }
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginXXS
+
+        NText {
+          text: "Password"
+          font.pointSize: Style.fontSizeXS
+          font.weight: Font.Medium
+          color: Color.mOnSurfaceVariant
+        }
+
+        StyledField {
+          text: authPassInput
+          echoMode: TextInput.Password
+          passwordCharacter: "•"
+          placeholder: "••••••••"
+          onTextEdited: (t) => authPassInput = t
+          onAccepted: performLogin()
+        }
+      }
+
+      NButton {
+        text: loggingIn ? "Logging in..." : "Log In"
+        enabled: !loggingIn
+        Layout.fillWidth: true
+        Layout.topMargin: Style.marginXS
+        onClicked: performLogin()
+      }
+    }
+
+    // Divider
+    RowLayout {
+      Layout.fillWidth: true
+      Layout.topMargin: Style.marginXS
+      Layout.bottomMargin: Style.marginXS
+      spacing: Style.marginS
+
+      Rectangle { Layout.fillWidth: true; height: 1; color: Qt.alpha(Style.capsuleBorderColor, 0.5) }
+      NText {
+        text: "or"
+        font.pointSize: Style.fontSizeXS
+        color: Color.mOnSurfaceVariant
+      }
+      Rectangle { Layout.fillWidth: true; height: 1; color: Qt.alpha(Style.capsuleBorderColor, 0.5) }
+    }
+
+    SettingsCard {
+      title: "API Key"
+
+      StyledField {
+        id: apiKeyFieldInCard
+        text: authKeyInput
+        echoMode: TextInput.Password
+        passwordCharacter: "•"
+        placeholder: "sk-..."
+        onTextEdited: (t) => authKeyInput = t
+      }
+
+      NButton {
+        text: "Save API Key"
+        Layout.fillWidth: true
+        Layout.topMargin: Style.marginXS
+        onClicked: saveManualKey()
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════
+  //  Configuration (when authenticated)
+  // ═══════════════════════════════════════════
+
+  ColumnLayout {
+    Layout.fillWidth: true
+    spacing: Style.marginM
+    visible: isAuthenticated
+
+    // ── Model Selection ──
+    SettingsCard {
+      title: "Model"
+
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginS
+
+        StyledComboBox {
           id: modelComboSettings
           Layout.fillWidth: true
           enabled: !fetchingModels && availableModels.length > 0
@@ -464,209 +623,227 @@ ColumnLayout {
               root.valueModel = availableModels[currentIndex];
             }
           }
-          
+
           delegate: ItemDelegate {
-            width: modelComboSettings.width
+            width: modelComboSettings.width - 8
+            height: 38
+            highlighted: modelComboSettings.highlightedIndex === index
+
             contentItem: RowLayout {
               spacing: Style.marginS
               
               NIcon {
-                icon: "robot"
-                pointSize: Style.fontSizeM
-                color: Color.mPrimary
+                icon: "bot"
+                pointSize: Style.fontSizeXS
+                color: highlighted ? Color.mPrimary : Color.mOnSurfaceVariant
               }
               
-              ColumnLayout {
+              NText {
+                text: modelData
+                font.pointSize: Style.fontSizeS
+                color: highlighted ? Color.mPrimary : Color.mOnSurface
                 Layout.fillWidth: true
-                spacing: Style.marginXXS
-                
-                NText {
-                  text: modelData
-                  font.pointSize: Style.fontSizeS
-                  color: Color.mOnSurface
-                  Layout.fillWidth: true
-                  elide: Text.ElideRight
-                  font.weight: Font.Medium
-                }
+                elide: Text.ElideRight
               }
             }
-            highlighted: modelComboSettings.highlightedIndex === index
+
             background: Rectangle {
-              color: highlighted ? Color.mHover : "transparent"
-              radius: Style.radiusS
+              color: highlighted ? Qt.alpha(Color.mPrimary, 0.1) : (hovered ? Qt.alpha(Color.mOnSurface, 0.05) : "transparent")
+              radius: Style.radiusXS
+              Behavior on color { ColorAnimation { duration: 100 } }
             }
           }
         }
 
-        RowLayout {
-          Layout.fillWidth: true
-          spacing: Style.marginXXS
-          visible: modelsError || fetchingModels
+        NButton {
+          text: fetchingModels ? "..." : "↻"
+          enabled: !fetchingModels
+          onClicked: fetchModels()
 
-          NIcon {
-            icon: modelsError ? "alert-circle" : "loader-2"
-            pointSize: Style.fontSizeXS
-            color: modelsError ? Color.mOnSurfaceVariant : Color.mPrimary
-            
-            RotationAnimation on rotation {
-              running: fetchingModels
-              loops: Animation.Infinite
-              from: 0
-              to: 360
-              duration: 1000
-            }
-          }
+          ToolTip.text: "Refresh models"
+          ToolTip.visible: hovered
+        }
+      }
 
-          NText {
-            text: modelsError ? modelsError : "Loading models..."
-            font.pointSize: Style.fontSizeXS
-            color: modelsError ? Color.mOnSurfaceVariant : Color.mOnSurfaceVariant
-            Layout.fillWidth: true
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginXS
+        visible: modelsError || fetchingModels || (availableModels.length > 0 && !fetchingModels)
+
+        NIcon {
+          icon: modelsError ? "alert-circle" : (fetchingModels ? "loader-2" : "check-circle")
+          pointSize: Style.fontSizeXS
+          color: modelsError ? Qt.alpha(Color.mError, 0.7) : (fetchingModels ? Color.mPrimary : Qt.alpha(Color.mOnSurfaceVariant, 0.6))
+          
+          RotationAnimation on rotation {
+            running: fetchingModels
+            loops: Animation.Infinite
+            from: 0; to: 360; duration: 1000
           }
         }
 
         NText {
-          text: availableModels.length + " models available"
+          text: modelsError ? modelsError : (fetchingModels ? "Loading models..." : availableModels.length + " models available")
           font.pointSize: Style.fontSizeXS
-          color: Color.mPrimary
-          visible: availableModels.length > 0 && !fetchingModels
+          color: modelsError ? Qt.alpha(Color.mError, 0.7) : Color.mOnSurfaceVariant
+          Layout.fillWidth: true
         }
       }
-
-      NButton {
-        text: fetchingModels ? "Refreshing..." : "Refresh"
-        enabled: !fetchingModels
-        onClicked: fetchModels()
-        Layout.alignment: Qt.AlignBottom
-      }
     }
 
-    Rectangle {
-      Layout.fillWidth: true
-      height: 1
-      color: Style.capsuleBorderColor
-      Layout.topMargin: Style.marginS
-      Layout.bottomMargin: Style.marginS
-    }
+    // ── Panel Position ──
+    SettingsCard {
+      title: "Panel Layout"
 
-    NText {
-      text: "Panel Configuration"
-      font.pointSize: Style.fontSizeL
-      font.weight: Font.Bold
-      color: Color.mOnSurface
-    }
-
-    ColumnLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginS
-
-      NLabel {
-        label: "Panel Position"
-        description: "Where the panel should appear on screen"
-      }
-
-      ComboBox {
+      ColumnLayout {
         Layout.fillWidth: true
-        model: [
-          "Top Left",
-          "Top",
-          "Top Right",
-          "Right",
-          "Bottom Right",
-          "Bottom",
-          "Bottom Left",
-          "Left"
-        ]
-        currentIndex: {
-          var pos = root.valuePosition;
-          if (pos === "top-left") return 0;
-          if (pos === "top") return 1;
-          if (pos === "top-right") return 2;
-          if (pos === "right") return 3;
-          if (pos === "bottom-right") return 4;
-          if (pos === "bottom") return 5;
-          if (pos === "bottom-left") return 6;
-          if (pos === "left") return 7;
-          return 3; // default to right
+        spacing: Style.marginXS
+
+        NText {
+          text: "Position"
+          font.pointSize: Style.fontSizeXS
+          font.weight: Font.Medium
+          color: Color.mOnSurfaceVariant
         }
-        onActivated: {
-          var positions = ["top-left", "top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left"];
-          root.valuePosition = positions[currentIndex];
+
+        StyledComboBox {
+          model: [
+            "Top Left",
+            "Top",
+            "Top Right",
+            "Right",
+            "Bottom Right",
+            "Bottom",
+            "Bottom Left",
+            "Left"
+          ]
+          currentIndex: {
+            var pos = root.valuePosition;
+            if (pos === "top-left") return 0;
+            if (pos === "top") return 1;
+            if (pos === "top-right") return 2;
+            if (pos === "right") return 3;
+            if (pos === "bottom-right") return 4;
+            if (pos === "bottom") return 5;
+            if (pos === "bottom-left") return 6;
+            if (pos === "left") return 7;
+            return 3;
+          }
+          onActivated: {
+            var positions = ["top-left", "top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left"];
+            root.valuePosition = positions[currentIndex];
+          }
+        }
+      }
+
+      // Width slider
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginXS
+        Layout.topMargin: Style.marginXS
+
+        RowLayout {
+          Layout.fillWidth: true
+
+          NText {
+            text: "Width"
+            font.pointSize: Style.fontSizeXS
+            font.weight: Font.Medium
+            color: Color.mOnSurfaceVariant
+            Layout.fillWidth: true
+          }
+
+          NText {
+            text: root.valueWidth.toFixed(0) + " px"
+            font.pointSize: Style.fontSizeXS
+            font.weight: Font.Medium
+            color: Color.mPrimary
+          }
+        }
+
+        Slider {
+          Layout.fillWidth: true
+          from: 320
+          to: 1280
+          stepSize: 10
+          value: root.valueWidth
+          onValueChanged: root.valueWidth = value
+        }
+      }
+
+      // Height slider
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginXS
+
+        RowLayout {
+          Layout.fillWidth: true
+
+          NText {
+            text: "Height"
+            font.pointSize: Style.fontSizeXS
+            font.weight: Font.Medium
+            color: Color.mOnSurfaceVariant
+            Layout.fillWidth: true
+          }
+
+          NText {
+            text: root.valueHeight.toFixed(0) + " px"
+            font.pointSize: Style.fontSizeXS
+            font.weight: Font.Medium
+            color: Color.mPrimary
+          }
+        }
+
+        Slider {
+          Layout.fillWidth: true
+          from: 320
+          to: 1080
+          stepSize: 10
+          value: root.valueHeight
+          onValueChanged: root.valueHeight = value
         }
       }
     }
 
-    ColumnLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginS
+    // ── Behavior ──
+    SettingsCard {
+      title: "Behavior"
 
-      NLabel {
-        label: "Panel width"
-        description: "Adjust panel width in pixels"
-      }
-
-      Slider {
-        from: 320
-        to: 1280
-        stepSize: 10
-        value: root.valueWidth
-        onValueChanged: root.valueWidth = value
-      }
-
-      NText {
-        text: root.valueWidth.toFixed(0) + " px"
-        font.pointSize: Style.fontSizeS
-        color: Color.mOnSurfaceVariant
-      }
-    }
-
-    ColumnLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginS
-
-      NLabel {
-        label: "Panel height"
-        description: "Adjust panel height in pixels"
-      }
-
-      Slider {
-        from: 320
-        to: 1080
-        stepSize: 10
-        value: root.valueHeight
-        onValueChanged: root.valueHeight = value
-      }
-
-      NText {
-        text: root.valueHeight.toFixed(0) + " px"
-        font.pointSize: Style.fontSizeS
-        color: Color.mOnSurfaceVariant
-      }
-    }
-
-    RowLayout {
-      Layout.fillWidth: true
-      spacing: Style.marginM
-
-      NLabel {
+      SettingRow {
         label: "Remember Chat History"
-        description: "Persist chat messages between sessions"
-        Layout.fillWidth: true
+        description: "Persist messages between sessions"
+
+        CheckBox {
+          checked: root.valueRememberHistory
+          onToggled: root.valueRememberHistory = checked
+        }
       }
 
-      CheckBox {
-        checked: root.valueRememberHistory
-        onToggled: root.valueRememberHistory = checked
+      Rectangle {
+        Layout.fillWidth: true
+        height: 1
+        color: Qt.alpha(Style.capsuleBorderColor, 0.3)
+      }
+
+      SettingRow {
+        label: "Open Panel After Response"
+        description: "Show panel on active monitor when generation finishes"
+
+        CheckBox {
+          checked: root.valueReopenOnSameMonitor
+          onToggled: root.valueReopenOnSameMonitor = checked
+        }
       }
     }
 
+    // Footer note
     NText {
-      text: "Your token is stored locally in plugin settings."
+      text: "Auth token stored locally in plugin settings."
       font.pointSize: Style.fontSizeXS
-      color: Color.mOnSurfaceVariant
-      wrapMode: Text.Wrap
-      Layout.fillWidth: true
-      Layout.topMargin: Style.marginM
+      color: Qt.alpha(Color.mOnSurfaceVariant, 0.6)
+      Layout.alignment: Qt.AlignHCenter
+      Layout.topMargin: Style.marginS
     }
   }
 
@@ -683,6 +860,7 @@ ColumnLayout {
     pluginApi.pluginSettings.panelWidth = root.valueWidth;
     pluginApi.pluginSettings.panelHeight = root.valueHeight;
     pluginApi.pluginSettings.rememberHistory = root.valueRememberHistory;
+    pluginApi.pluginSettings.openAfterResponse = root.valueReopenOnSameMonitor;
 
     pluginApi.saveSettings();
     Logger.i("OpenWebUI", "Settings saved");

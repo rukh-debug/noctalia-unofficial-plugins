@@ -16,6 +16,7 @@ Item {
   property string currentResponse: ""
   property string errorMessage: ""
   property bool isManuallyStopped: false
+  property bool isPanelVisible: false
   property string currentChatId: "" // Track current chat for context
 
   // Save state when currentChatId changes
@@ -35,6 +36,7 @@ Item {
   readonly property string apiToken: pluginApi?.pluginSettings?.apiToken || pluginApi?.manifest?.metadata?.defaultSettings?.apiToken || ""
   readonly property string currentModel: pluginApi?.pluginSettings?.defaultModel || pluginApi?.manifest?.metadata?.defaultSettings?.defaultModel || ""
   readonly property bool rememberHistory: pluginApi?.pluginSettings?.rememberHistory ?? pluginApi?.manifest?.metadata?.defaultSettings?.rememberHistory ?? true
+  readonly property bool openAfterResponse: pluginApi?.pluginSettings?.openAfterResponse ?? pluginApi?.manifest?.metadata?.defaultSettings?.openAfterResponse ?? true
 
   Component.onCompleted: {
     Logger.i("OpenWebUI", "Plugin initialized");
@@ -301,6 +303,14 @@ Item {
         
         // Save or update the chat on the server (this will call title generation and background tasks after save)
         root.saveOrUpdateChat();
+
+        // Auto-open panel on the currently active monitor if setting is enabled
+        // Only open if the panel is not already visible (openPanel toggles, so we must guard)
+        if (pluginApi && root.openAfterResponse && !root.isPanelVisible) {
+          pluginApi.withCurrentScreen(function(screen) {
+            pluginApi.openPanel(screen);
+          });
+        }
       }
 
       openwebuiProcess.buffer = "";

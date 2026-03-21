@@ -22,7 +22,8 @@
       "panelPosition": "bottom",
       "panelWidth": 900,
       "panelHeight": 560,
-      "rememberHistory": true
+      "rememberHistory": true,
+      "openAfterResponse": true
     }
   }
 }

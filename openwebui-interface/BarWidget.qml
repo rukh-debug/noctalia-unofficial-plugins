@@ -48,12 +48,6 @@ NIconButton {
       rotation = 0
     }
 
-    if (wasGenerating && !isGenerating) {
-      if (pluginApi) {
-        pluginApi.openPanel(screen)
-      }
-    }
-
     wasGenerating = isGenerating
   }
 
