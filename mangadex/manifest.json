@@ -1,0 +1,56 @@
+{
+  "id": "mangadex",
+  "name": "MangaDex Reader",
+  "version": "0.1.0",
+  "minNoctaliaVersion": "4.1.2",
+  "author": "rukh-debug",
+  "license": "MIT",
+  "repository": "https://github.com/rukh-debug/noctalia-unofficial-plugins",
+  "description": "Search MangaDex, browse chapters, and read manga inside a side-panel reader with optional account sync.",
+  "tags": ["Manga", "Reader", "Productivity"],
+  "entryPoints": {
+    "main": "Main.qml",
+    "panel": "Panel.qml",
+    "settings": "Settings.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "metadata": {
+    "defaultSettings": {
+      "panelDetached": true,
+      "panelPosition": "right",
+      "panelWidth": 1120,
+      "panelWidthMin": 760,
+      "panelWidthMax": 1800,
+      "panelHeight": 760,
+      "auth": {
+        "clientId": "",
+        "clientSecret": "",
+        "identity": "",
+        "username": "",
+        "rememberSession": true,
+        "refreshToken": ""
+      },
+      "reader": {
+        "quality": "data-saver",
+        "preferredLanguage": "en",
+        "translatedLanguages": ["en"],
+        "contentRatings": ["safe", "suggestive", "erotica"],
+        "continuousScroll": true,
+        "minimalControls": true,
+        "utilityCollapsed": false,
+        "pageCacheMaxEntries": 80,
+        "pageCachePerChapterMaxEntries": 30
+      },
+      "network": {
+        "searchPageSize": 20,
+        "cooldownSecondsOn429": 8,
+        "requestPacingMs": 250,
+        "maxRetryAttempts": 2,
+        "retryBaseDelayMs": 400
+      },
+      "diagnostics": {
+        "loggingMode": "normal"
+      }
+    }
+  }
+}
