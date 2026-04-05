@@ -34,6 +34,23 @@
       "lastUpdated": "2026-02-15T08:21:07-05:00"
     },
     {
+      "id": "mangadex",
+      "name": "MangaDex Reader",
+      "version": "0.1.0",
+      "official": false,
+      "author": "rukh-debug",
+      "description": "Search MangaDex, browse chapters, and read manga inside a side-panel reader with optional account sync.",
+      "repository": "https://github.com/rukh-debug/noctalia-unofficial-plugins",
+      "minNoctaliaVersion": "4.1.2",
+      "license": "MIT",
+      "tags": [
+        "Manga",
+        "Reader",
+        "Productivity"
+      ],
+      "lastUpdated": "2026-04-05T06:39:23-04:00"
+    },
+    {
       "id": "mangowc-keymode-submap",
       "name": "MangoWC Keymode/Submap",
       "version": "1.2.0",
