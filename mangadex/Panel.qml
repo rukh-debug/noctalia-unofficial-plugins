@@ -1390,14 +1390,6 @@ Item {
                            pageIndex: index,
                            source: originalSource
                          }, "Page entered viewport activation window");
-
-                         if (pageItem.imageSource !== "" && pageImage.status !== Image.Ready) {
-                           var rebound = pageItem.imageSource;
-                           pageItem.imageSource = "";
-                           Qt.callLater(function() {
-                             pageItem.imageSource = rebound;
-                           });
-                         }
                        }
                      }
 
