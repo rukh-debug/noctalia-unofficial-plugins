@@ -8,8 +8,13 @@ import "MangaDexApi.js" as MangaDexApi
 import "ReaderService.js" as ReaderService
 import "Diagnostics.js" as Diagnostics
 import "api/PaginationRules.js" as PaginationRules
+import "api/CoverResolver.js" as CoverResolver
 import "core/ReaderRecovery.js" as ReaderRecovery
+import "core/TransitionManager.js" as TransitionManager
+import "core/PageCacheManager.js" as PageCacheManager
+import "core/StateManager.js" as StateManager
 import "reader/PageSlotModel.js" as PageSlotModel
+import "sync/ReadingSync.js" as ReadingSync
 import "utils/SearchMerge.js" as SearchMerge
 
 Item {
@@ -136,6 +141,7 @@ Item {
   property string pendingRefetchSlotKey: ""
   property int chapterLoadToken: 0
   property string chapterLoadState: "idle"
+  property int atHomeMetadataFetchedAt: 0
   property string qualityMode: defaultQualityMode
   property var readerViewportAnchor: ({
     chapterId: "",
@@ -282,10 +288,42 @@ Item {
   }
 
   Timer {
+    id: searchTimeoutTimer
+    interval: 20000
+    repeat: false
+    onTriggered: {
+      if (root.isLoadingSearch) {
+        root.isLoadingSearch = false;
+        root.searchError = "Search timed out. Try again or check your connection.";
+        Diagnostics.warn("search.timeout", {
+          query: root.searchQuery,
+          timeoutMs: interval
+        }, "Search request timed out after " + (interval / 1000) + "s");
+      }
+    }
+  }
+
+  Timer {
     id: readerTransitionSettleTimer
     interval: root.readerTransitionSettleMs
     repeat: false
     onTriggered: settleReaderTransition("timer")
+  }
+
+  Timer {
+    id: rateLimitCountdownTimer
+    interval: 1000
+    repeat: true
+    running: root.cooldownUntil > 0 && root.cooldownRemainingSec() > 0
+    onTriggered: {
+      var remaining = root.cooldownRemainingSec();
+      if (remaining > 0) {
+        root.apiStatusText = "Rate limited \u2014 available in " + remaining + "s";
+      } else {
+        root.cooldownUntil = 0;
+        root.apiStatusText = "";
+      }
+    }
   }
 
   // --------------------
@@ -441,6 +479,17 @@ Item {
       return;
     }
 
+    if (readerRenderEpoch > 100) {
+      Diagnostics.warn("reader.render_epoch.cap_reached", {
+        chapterId: currentChapter?.id || "",
+        reason: normalizedReason,
+        renderEpoch: readerRenderEpoch
+      }, "Render epoch exceeded cap — resetting to prevent runaway cascade");
+      readerRenderEpoch = 0;
+      clearReaderTransition(true);
+      return;
+    }
+
     if (readerTransitionActive && ReaderRecovery.isCriticalRemountReason(normalizedReason)) {
       Diagnostics.warn("reader.render_epoch.critical_bypass", {
         chapterId: currentChapter?.id || "",
@@ -452,6 +501,54 @@ Item {
     }
 
     performReaderRenderEpochBump(normalizedReason, persistState);
+  }
+
+  function notifyPanelHidden() {
+    resetTransitionState();
+    Diagnostics.info("panel.lifecycle.hidden", {
+      chapterId: currentChapter?.id || "",
+      hasPageUrls: pageUrls.length > 0,
+      chapterLoadState: chapterLoadState
+    }, "Panel hidden — transition state reset");
+  }
+
+  function notifyPanelShown() {
+    resetTransitionState();
+
+    if (!currentChapter || !currentChapter.id) {
+      Diagnostics.debug("panel.lifecycle.shown.no_chapter", {},
+        "Panel shown but no chapter loaded");
+      return;
+    }
+
+    if (pageUrls.length > 0 && chapterLoadState === "success") {
+      hydratePageSlotStates("panel_reopen");
+      bumpReaderRenderEpoch("panel_reopen", false);
+      Diagnostics.info("panel.lifecycle.shown.reuse", {
+        chapterId: currentChapter.id,
+        pageCount: pageUrls.length
+      }, "Panel shown — reusing cached page data");
+      return;
+    }
+
+    if (chapterLoadState === "loading" || chapterLoadState === "idle") {
+      Diagnostics.debug("panel.lifecycle.shown.pending", {
+        chapterId: currentChapter.id,
+        chapterLoadState: chapterLoadState
+      }, "Panel shown — chapter load already in progress or idle");
+    }
+  }
+
+  function resetTransitionState() {
+    clearReaderTransition(false);
+    chapterRecoveryInProgress = false;
+    pendingRefetchSlotKey = "";
+    transitionRecoveryAttempts = ({});
+    readerTransitionSuppressedCount = 0;
+
+    Diagnostics.debug("reader.transition.reset", {
+      chapterId: currentChapter?.id || ""
+    }, "Reset all transition and recovery state");
   }
 
   function resetPageSlotStates(reason) {
@@ -790,6 +887,7 @@ Item {
     }
 
     cooldownUntil = nowSec() + (retryAfterSec > 0 ? retryAfterSec : cooldownSecondsOn429);
+    apiStatusText = "Rate limited \u2014 available in " + cooldownRemainingSec() + "s";
 
     Diagnostics.warn("api.rate_limit.cooldown", {
       requestId: errorObj.requestId || "",
@@ -1267,11 +1365,11 @@ Item {
   // --------------------
   function searchManga(reset) {
     if (isLoadingSearch) {
-      Diagnostics.debug("search.skip.loading", {
+      Diagnostics.debug("search.supersede.loading", {
         query: searchQuery,
         reset: !!reset
-      }, "Skipped search while previous request is still active");
-      return;
+      }, "Cancelling previous search to start a new one");
+      cancelSearch();
     }
 
     if (isCoolingDown()) {
@@ -1316,6 +1414,7 @@ Item {
     }
 
     isLoadingSearch = true;
+    searchTimeoutTimer.restart();
     Diagnostics.info("search.request.start", {
       query: query,
       offset: requestOffset,
@@ -1335,6 +1434,7 @@ Item {
         "",
         function(responseObj) {
           isLoadingSearch = false;
+          searchTimeoutTimer.stop();
 
           var incoming = responseObj.data || [];
           var existing = reset ? [] : searchResults;
@@ -1365,6 +1465,7 @@ Item {
         },
         function(errorObj) {
           isLoadingSearch = false;
+          searchTimeoutTimer.stop();
           applyRateLimitIfNeeded(errorObj);
           searchError = parseApiError(errorObj, "Failed to search manga.");
           Diagnostics.error("search.request.failure", {
@@ -1384,6 +1485,7 @@ Item {
       }));
     } catch (e) {
       isLoadingSearch = false;
+      searchTimeoutTimer.stop();
       searchError = "Search initialization failed: " + e;
       Diagnostics.error("search.request.exception", {
         query: query,
@@ -1398,6 +1500,18 @@ Item {
       return;
     }
     searchManga(false);
+  }
+
+  function cancelSearch() {
+    if (!isLoadingSearch) {
+      return;
+    }
+    isLoadingSearch = false;
+    searchTimeoutTimer.stop();
+    searchError = "";
+    Diagnostics.info("search.cancelled", {
+      query: searchQuery
+    }, "Search cancelled by user");
   }
 
   function selectManga(manga) {
@@ -1663,6 +1777,7 @@ Item {
 
     currentChapter = chapter;
     atHomeMetadata = null;
+    atHomeMetadataFetchedAt = 0;
     pageUrls = [];
     readerError = "";
     chapterRetryUsed = false;
@@ -2063,8 +2178,33 @@ Item {
     return false;
   }
 
+  function isAtHomeMetadataFresh(chapterId) {
+    if (!atHomeMetadata || !currentChapter || currentChapter.id !== chapterId) {
+      return false;
+    }
+    if (atHomeMetadataFetchedAt <= 0) {
+      return false;
+    }
+    var ageMs = Date.now() - atHomeMetadataFetchedAt;
+    return ageMs < 300000;
+  }
+
   function loadChapterPages(chapterId) {
     if (!chapterId) {
+      return;
+    }
+
+    if (isAtHomeMetadataFresh(chapterId) && pageUrls.length > 0) {
+      isLoadingPages = false;
+      chapterRecoveryInProgress = false;
+      chapterLoadState = "success";
+      hydratePageSlotStates("reuse_fresh_metadata");
+      bumpReaderRenderEpoch("page_model_changed", false);
+      Diagnostics.info("chapter.load.cache_reuse", {
+        chapterId: chapterId,
+        pageCount: pageUrls.length,
+        ageMs: Date.now() - atHomeMetadataFetchedAt
+      }, "Reused fresh At-Home metadata without API call");
       return;
     }
 
@@ -2087,6 +2227,7 @@ Item {
     chapterRecoveryInProgress = true;
     chapterLoadState = "loading";
     atHomeMetadata = null;
+    atHomeMetadataFetchedAt = 0;
     pageUrls = [];
     readerError = "";
     resetPageSlotStates("chapter_loading");
@@ -2124,6 +2265,7 @@ Item {
         }
 
         atHomeMetadata = responseObj;
+        atHomeMetadataFetchedAt = Date.now();
         pageUrls = buildRuntimePageEntries(responseObj, qualityMode);
         hydratePageSlotStates("chapter_load_success");
         bumpReaderRenderEpoch("page_model_changed", false);
@@ -2765,18 +2907,7 @@ Item {
   // Sync
   // --------------------
   function mangaIdForChapter(chapter) {
-    if (!chapter || !chapter.relationships) {
-      return "";
-    }
-
-    for (var i = 0; i < chapter.relationships.length; i++) {
-      var rel = chapter.relationships[i];
-      if (rel.type === "manga") {
-        return rel.id || "";
-      }
-    }
-
-    return "";
+    return ReadingSync.mangaIdForChapter(chapter);
   }
 
   function chapterIsRead(chapterId) {
@@ -3006,5 +3137,13 @@ Item {
 
   function chapterLabel(chapter) {
     return ReaderService.chapterLabel(chapter);
+  }
+
+  function mangaCoverUrl(manga) {
+    return CoverResolver.mangaCoverUrl(manga, "256");
+  }
+
+  function readingStatusLabel(value) {
+    return ReadingSync.readingStatusLabel(value);
   }
 }

@@ -196,6 +196,48 @@ function buildPageUrls(atHomeResponse, qualityMode) {
     return urls;
 }
 
+function mangaCoverUrl(manga, size) {
+    if (!manga || !manga.id || !manga.relationships) {
+        return "";
+    }
+
+    var fileName = "";
+    for (var i = 0; i < manga.relationships.length; i++) {
+        var rel = manga.relationships[i];
+        if (rel.type === "cover_art" && rel.attributes && rel.attributes.fileName) {
+            fileName = String(rel.attributes.fileName).trim();
+            break;
+        }
+    }
+
+    if (fileName === "") {
+        return "";
+    }
+
+    var baseUrl = "https://uploads.mangadex.org/covers/" + manga.id + "/" + fileName;
+    if (size === "256" || size === "thumbnail") {
+        return baseUrl + ".256.jpg";
+    }
+    if (size === "512") {
+        return baseUrl + ".512.jpg";
+    }
+    return baseUrl;
+}
+
+function readingStatusLabel(value) {
+    var labels = {
+        "": "Set status...",
+        "reading": "Reading",
+        "on_hold": "On Hold",
+        "plan_to_read": "Plan to Read",
+        "dropped": "Dropped",
+        "re_reading": "Re-reading",
+        "completed": "Completed"
+    };
+    var key = String(value || "").trim();
+    return labels[key] || key;
+}
+
 function isChapterRead(readMap, chapterId) {
     if (!readMap || !chapterId) {
         return false;

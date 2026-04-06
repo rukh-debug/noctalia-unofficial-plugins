@@ -72,9 +72,18 @@ Item {
   }
 
   Component.onCompleted: {
+    if (mainInstance && mainInstance.notifyPanelShown) {
+      mainInstance.notifyPanelShown();
+    }
     Qt.callLater(function() {
       root.scheduleAnchorRestore("panel_open", 180);
     });
+  }
+
+  Component.onDestruction: {
+    if (mainInstance && mainInstance.notifyPanelHidden) {
+      mainInstance.notifyPanelHidden();
+    }
   }
 
   function clampUnitInterval(value) {
@@ -295,7 +304,17 @@ Item {
     }, "Restored reader viewport anchor after layout/model transition");
   }
 
+  property bool panelClosing: false
+
   function closePanel() {
+    if (!pluginApi || panelClosing) { return; }
+
+    panelClosing = true;
+    panelSurface.x = panelSurface.offscreenX;
+    closePanelTimer.start();
+  }
+
+  function performClosePanel() {
     if (!pluginApi) { return; }
 
     if (screen) {
@@ -308,6 +327,13 @@ Item {
         pluginApi.closePanel(currentScreen);
       });
     }
+  }
+
+  Timer {
+    id: closePanelTimer
+    interval: 260
+    repeat: false
+    onTriggered: root.performClosePanel()
   }
 
   function setUtilityCollapsed(nextCollapsed) {
@@ -533,9 +559,28 @@ Item {
     id: panelSurface
     anchors.top: parent.top
     anchors.bottom: parent.bottom
-    anchors.left: panelAnchorLeft ? parent.left : undefined
-    anchors.right: panelAnchorRight ? parent.right : undefined
     width: Math.max(560 * Style.uiScaleRatio, Math.min(parent.width, root.contentPreferredWidth))
+
+    property real targetX: root.panelAnchorRight ? parent.width - width : 0
+    property real offscreenX: root.panelAnchorRight ? parent.width : -width
+    property bool animationReady: false
+
+    x: targetX
+
+    Behavior on x {
+      enabled: panelSurface.animationReady
+      NumberAnimation {
+        duration: 220
+        easing.type: Easing.OutCubic
+      }
+    }
+
+    Component.onCompleted: {
+      panelSurface.x = panelSurface.offscreenX;
+      panelSurface.animationReady = true;
+      panelSurface.x = Qt.binding(function() { return panelSurface.targetX; });
+    }
+
     color: Qt.alpha(Color.mSurface, 0.985)
     border.width: 1
     border.color: Qt.alpha(Style.capsuleBorderColor, 0.9)
@@ -622,7 +667,20 @@ Item {
 
             StyledComboBox {
               id: statusSelector
+
+              readonly property var statusLabels: ({
+                "": "Set status...",
+                "reading": "Reading",
+                "on_hold": "On Hold",
+                "plan_to_read": "Plan to Read",
+                "dropped": "Dropped",
+                "re_reading": "Re-reading",
+                "completed": "Completed"
+              })
+
               model: ["", "reading", "on_hold", "plan_to_read", "dropped", "re_reading", "completed"]
+              displayText: statusLabels[currentText] || currentText
+
               currentIndex: {
                 var target = mainInstance?.mangaReadingStatus || "";
                 for (var i = 0; i < model.length; i++) {
@@ -632,9 +690,22 @@ Item {
               }
               onActivated: {
                 if (mainInstance) {
-                  mainInstance.setMangaReadingStatus(currentText);
+                  mainInstance.setMangaReadingStatus(model[currentIndex]);
                 }
               }
+
+              delegate: ItemDelegate {
+                width: statusSelector.width
+                contentItem: NText {
+                  text: statusSelector.statusLabels[modelData] || modelData
+                  pointSize: Style.fontSizeS
+                  color: Color.mOnSurface
+                }
+                highlighted: statusSelector.highlightedIndex === index
+              }
+
+              ToolTip.visible: hovered && currentIndex === 0
+              ToolTip.text: "Set your reading status for this manga"
             }
 
             NIconButton {
@@ -744,9 +815,21 @@ Item {
                   Item { Layout.fillWidth: true }
 
                   NText {
-                    text: (mainInstance?.isLoadingSearch || false) ? "Loading..." : ""
-                    color: Color.mOnSurfaceVariant
+                    visible: mainInstance?.isLoadingSearch || false
+                    text: "Cancel"
+                    color: Color.mError
                     pointSize: Style.fontSizeXS
+                    font.underline: true
+
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        if (mainInstance && mainInstance.cancelSearch) {
+                          mainInstance.cancelSearch();
+                        }
+                      }
+                    }
                   }
                 }
 
@@ -817,18 +900,34 @@ Item {
                         anchors.bottomMargin: Style.marginS
                         spacing: Style.marginS
 
-                        // Cover thumbnail placeholder
-                        Rectangle {
+                        // Cover thumbnail
+                        Item {
                           Layout.preferredWidth: 40
                           Layout.preferredHeight: 56
-                          radius: Style.radiusXS
-                          color: Qt.alpha(Color.mSurfaceVariant, 0.5)
+                          clip: true
 
-                          NIcon {
-                            anchors.centerIn: parent
-                            icon: resolveControlIcon("book-2", "settings")
-                            pointSize: Style.fontSizeS
-                            color: Color.mPrimary
+                          Image {
+                            id: coverImage
+                            anchors.fill: parent
+                            source: mainInstance ? mainInstance.mangaCoverUrl(modelData) : ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            cache: true
+                            visible: status === Image.Ready
+                          }
+
+                          Rectangle {
+                            anchors.fill: parent
+                            radius: Style.radiusXS
+                            color: Qt.alpha(Color.mSurfaceVariant, 0.5)
+                            visible: coverImage.status !== Image.Ready
+
+                            NIcon {
+                              anchors.centerIn: parent
+                              icon: resolveControlIcon("book-2", "settings")
+                              pointSize: Style.fontSizeS
+                              color: Color.mPrimary
+                            }
                           }
                         }
 
