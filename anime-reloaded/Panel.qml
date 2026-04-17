@@ -192,20 +192,12 @@ Item {
                     }
                 }
 
-                ShaderEffectSource {
-                    id: blurredContentSource
+                MultiEffect {
                     anchors.fill: contentStack
-                    sourceItem: contentStack
-                    live: true
-                    recursive: true
-                    visible: root.settingsOpen
-                    hideSource: false
-                }
-
-                FastBlur {
-                    anchors.fill: contentStack
-                    source: blurredContentSource
-                    radius: 56
+                    source: contentStack
+                    blurEnabled: root.settingsOpen
+                    blur: 1.0
+                    blurMax: 56
                     transparentBorder: true
                     visible: root.settingsOpen
                     opacity: root.settingsOpen ? 1 : 0

@@ -12,8 +12,6 @@ Item {
     property ShellScreen screen
     property string widgetId: ""
     property string section: ""
-    property int sectionWidgetIndex: -1
-    property int sectionWidgetsCount: 0
 
     function _settingValue(key, fallback) {
         var value = pluginApi?.pluginSettings?.[key]
