@@ -1,4 +1,14 @@
+# Runtime / user data (plugin writes these at runtime)
 */settings.json
+**/forge.cache.js
+**/progress/
+**/*-library.json
+**/*-feed-cache.json
+**/*-provider-map.json
+**/*-mal-config.json
+**/__pycache__/
+
+# Other plugins / tooling
 clipper
 tailscale
 assistant-panel

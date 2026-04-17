@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt5Compat.GraphicalEffects
 import qs.Commons
 import qs.Widgets
 
@@ -895,14 +894,7 @@ Item {
                                 radius: 10
                                 color: "transparent"
                                 clip: true
-                                layer.enabled: true
-                                layer.effect: OpacityMask {
-                                    maskSource: Rectangle {
-                                        width: libImageWrapper.width
-                                        height: libImageWrapper.height
-                                        radius: libImageWrapper.radius
-                                    }
-                                }
+                                 // OpacityMask removed — parent clip: true + radius handles rounding
 
                                 Image {
                                     id: libCover

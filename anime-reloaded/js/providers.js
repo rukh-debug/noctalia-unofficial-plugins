@@ -17,12 +17,34 @@ Qt.include("mal-provider.js");
 // --- Public dispatcher API ---
 // Mirrors provider_cli.py command structure.
 // All methods are async: function(args..., callback) where callback(errorString, result)
+// NOTE: Using top-level function declarations (not var Providers = {}) so QML
+// import "js/providers.js" as Providers exposes them as Providers.metadata(), etc.
 
-var Providers = {};
+// --- Crypto cache management (called from Main.qml) ---
+
+function initCryptoCache(cacheDir) {
+    CryptoHelper.init(cacheDir);
+}
+
+function ensureCryptoLoaded() {
+    CryptoHelper.ensureLoaded();
+}
+
+function hasPendingForgeCache() {
+    return CryptoHelper.needsCacheWrite();
+}
+
+function getForgeCdnUrl() {
+    return CryptoHelper.cdnUrl();
+}
+
+function markForgeCacheWritten() {
+    CryptoHelper.markCacheWritten();
+}
 
 // --- Metadata provider commands ---
 
-Providers.metadata = function(providerId, command, args, callback) {
+function metadata(providerId, command, args, callback) {
     providerId = (providerId || "").trim();
     command = (command || "").trim();
 
@@ -104,7 +126,7 @@ Providers.metadata = function(providerId, command, args, callback) {
         if (providerId === "anilist") {
             _anilistFeed(feedEntries, feedMode, feedStreamProvider, callback);
         } else if (providerId === "allanime") {
-            _allanimeFeed(feedEntries, feedMode, feedStreamProvider, callback);
+            _allanimeFeed(feedEntries, feedMode, callback);
         } else {
             callback("Unknown metadata provider: " + providerId);
         }
@@ -112,11 +134,11 @@ Providers.metadata = function(providerId, command, args, callback) {
     }
 
     callback("Unknown metadata command: " + command);
-};
+}
 
 // --- Stream provider commands ---
 
-Providers.stream = function(providerId, command, args, callback) {
+function stream(providerId, command, args, callback) {
     providerId = (providerId || "").trim();
     command = (command || "").trim();
 
@@ -130,17 +152,19 @@ Providers.stream = function(providerId, command, args, callback) {
     var mode = args.mode || "sub";
     var mirrorPref = args.mirrorPref || "auto";
     var qualityPref = args.qualityPref || "best";
+    var metadataProviderId = args.metadataProviderId || providerId;
+    var title = args.title || "";
 
     if (providerId === "allanime") {
-        _allanimeResolveStream(showId, episodeNumber, mode, mirrorPref, qualityPref, callback);
+        _allanimeResolveStream(showId, episodeNumber, mode, mirrorPref, qualityPref, metadataProviderId, callback, title);
     } else {
         callback("Unknown stream provider: " + providerId);
     }
-};
+}
 
 // --- Sync provider commands ---
 
-Providers.sync = function(providerId, command, args, callback) {
+function sync(providerId, command, args, callback) {
     providerId = (providerId || "").trim();
     command = (command || "").trim();
 
@@ -180,4 +204,4 @@ Providers.sync = function(providerId, command, args, callback) {
     }
 
     callback("Unknown sync command: " + command);
-};
+}

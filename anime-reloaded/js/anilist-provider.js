@@ -84,12 +84,8 @@ function _alGql(query, variables, cacheScope, ttlSeconds, callback) {
     var stale = _alGetStaleData(key);
     if (cooldownUntil > nowTs && stale) { callback(null, stale); return; }
 
-    var gap = _AL_MIN_GAP - ((Date.now() - _AL_lastRequestAt));
-    if (gap > 0) {
-        setTimeout(function() { _alDoGql(query, variables, key, ttlSeconds, callback); }, gap);
-    } else {
-        _alDoGql(query, variables, key, ttlSeconds, callback);
-    }
+    // QML JS has no setTimeout — fire immediately. XHR round-trip provides natural rate limiting.
+    _alDoGql(query, variables, key, ttlSeconds, callback);
 }
 
 function _alDoGql(query, variables, key, ttlSeconds, callback) {

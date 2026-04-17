@@ -197,6 +197,8 @@ function _malBackendAwaitAuthSession(baseUrl, sessionId, timeoutSeconds, callbac
             if (err) { callback(err); return; }
             var status = ((payload || {}).status || "").trim().toLowerCase();
             if (status === "complete" || status === "completed" || status === "connected") {
+                if (!((payload.sessionToken || "").trim()))
+                    { callback("MAL backend login completed without a usable session token."); return; }
                 if (!((payload.accessToken || payload.access_token || "").trim()))
                     { callback("MAL backend login completed without a usable access token."); return; }
                 callback(null, payload);
@@ -206,7 +208,8 @@ function _malBackendAwaitAuthSession(baseUrl, sessionId, timeoutSeconds, callbac
                 callback((payload.error || "MAL backend login failed.").trim());
                 return;
             }
-            setTimeout(poll, 1000);
+            // QML JS has no setTimeout — XHR round-trip provides natural ~200-500ms delay
+            poll();
         });
     }
     poll();
@@ -276,7 +279,7 @@ function _malApiRequest(method, path, accessToken, params, data, callback) {
                 code = (errPayload.error || errPayload.code || "").trim();
                 message = (errPayload.message || errPayload.error_description || message).trim();
             } catch (e) {}
-            var fullError = code ? code + ": " + message : message;
+            var fullError = new Error(code ? code + ": " + message : message);
             fullError._isMalApiError = true;
             fullError._isContentFilter = _malIsContentFilter(message, responseText);
             fullError._statusCode = xhr.status;

@@ -991,6 +991,10 @@ Item {
         posterSize = _normalisePosterSize(panelSize, posterSize)
         if (pluginApi && pluginApi.pluginSettings)
             pluginApi.pluginSettings.posterSize = posterSize
+        // Init crypto cache dir, eagerly load forge, persist to disk if CDN was used
+        Providers.initCryptoCache((pluginApi ? pluginApi.pluginDir : "") + "/js/")
+        Providers.ensureCryptoLoaded()
+        _writeForgeCache()
         _migrateLibrarySchemaIfNeeded()
         _loadLibrary()
         _loadFeedNotificationState()
@@ -1785,6 +1789,26 @@ Item {
     Process { id: mkdirProc }
     Process { id: rmProc }
 
+    // Writes forge cache to disk after CDN download
+    Process {
+        id: forgeCacheWriteProc
+        onRunningChanged: {
+            if (!running) {
+                Providers.markForgeCacheWritten()
+                console.log("[Crypto] Forge cache written to disk")
+            }
+        }
+    }
+
+    function _writeForgeCache() {
+        if (!Providers.hasPendingForgeCache()) return
+        var cachePath = (pluginApi ? pluginApi.pluginDir : "") + "/js/forge.cache.js"
+        var cdnUrl = Providers.getForgeCdnUrl()
+        // Download directly via curl — keeps command tiny, no content in Process args
+        forgeCacheWriteProc.command = ["curl", "-sL", "-o", cachePath, cdnUrl]
+        forgeCacheWriteProc.running = true
+    }
+
     // ── MAL sync result handler ──────────────────────────────────────────────
     function _handleMalSyncResult(command, d) {
         if (d.config)
@@ -2180,7 +2204,7 @@ Item {
             if (err) { detailError = err; return }
             if (!d) return
             if (show) {
-                var preserveLocalId = String((show.providerRefs || {}).metadata || {}).id || "") !== String(show.id || "")
+                var preserveLocalId = String(((show.providerRefs || {}).metadata || {}).id || "") !== String(show.id || "")
                 var enriched = Object.assign({}, show, d)
                 if (preserveLocalId) enriched.id = show.id
                 enriched.episodes = _normaliseEpisodeList(d.episodes || [])
@@ -2215,7 +2239,9 @@ Item {
             episodeNumber: String(epNum || ""),
             mode: currentMode,
             mirrorPref: preferredProvider,
-            qualityPref: "best"
+            qualityPref: "best",
+            title: _showTitle(currentAnime),
+            metadataProviderId: _showMetadataProviderId(currentAnime)
         }, function(err, d) {
             isFetchingLinks = false
             if (err) { linksError = err; return }

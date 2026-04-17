@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt5Compat.GraphicalEffects
 import qs.Commons
 
 Item {
@@ -515,14 +514,7 @@ Item {
                                             radius: 14
                                             color: "transparent"
                                             clip: true
-                                            layer.enabled: true
-                                            layer.effect: OpacityMask {
-                                                maskSource: Rectangle {
-                                                    width: alertPoster.width
-                                                    height: alertPoster.height
-                                                    radius: alertPoster.radius
-                                                }
-                                            }
+                                             // OpacityMask removed — parent clip: true + radius handles rounding
 
                                             Image {
                                                 anchors.fill: parent
@@ -770,14 +762,7 @@ Item {
                                             radius: 14
                                             color: "transparent"
                                             clip: true
-                                            layer.enabled: true
-                                            layer.effect: OpacityMask {
-                                                maskSource: Rectangle {
-                                                    width: upcomingPoster.width
-                                                    height: upcomingPoster.height
-                                                    radius: upcomingPoster.radius
-                                                }
-                                            }
+                                             // OpacityMask removed — parent clip: true + radius handles rounding
 
                                             Image {
                                                 anchors.fill: parent

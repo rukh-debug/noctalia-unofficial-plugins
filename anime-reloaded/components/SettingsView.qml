@@ -552,7 +552,7 @@ Item {
 
                         Column {
                             Layout.fillWidth: true
-                            anchors.verticalCenter: parent.verticalCenter
+                            Layout.alignment: Qt.AlignVCenter
                             spacing: 1
 
                             Text {

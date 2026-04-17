@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import Qt5Compat.GraphicalEffects
 import qs.Commons
 import qs.Widgets
 import "components"
@@ -190,18 +189,6 @@ Item {
                             }
                         }
                     }
-                }
-
-                MultiEffect {
-                    anchors.fill: contentStack
-                    source: contentStack
-                    blurEnabled: root.settingsOpen
-                    blur: 1.0
-                    blurMax: 56
-                    transparentBorder: true
-                    visible: root.settingsOpen
-                    opacity: root.settingsOpen ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                 }
 
                 Rectangle {

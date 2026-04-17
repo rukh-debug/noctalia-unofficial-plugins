@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt5Compat.GraphicalEffects
 import qs.Commons
 import qs.Widgets
 
@@ -474,7 +473,6 @@ Item {
                 delegate: ChoiceChip {
                     readonly property bool active: (modelData === "All" && (anime?.currentGenre ?? "") === "") ||
                                                    (anime?.currentGenre === modelData)
-                    anchors.verticalCenter: parent.verticalCenter
                     text: modelData
                     selected: active
                     controlHeight: 32
@@ -903,14 +901,8 @@ Item {
                                     id: posterWrapper
                                     anchors { top: parent.top; left: parent.left; right: parent.right; bottom: titleBar.top }
                                     radius: 10; clip: true; color: "transparent"
-                                    layer.enabled: true
-                                    layer.effect: OpacityMask {
-                                        maskSource: Rectangle {
-                                            width: posterWrapper.width
-                                            height: posterWrapper.height
-                                            radius: posterWrapper.radius
-                                        }
-                                    }
+                                        // OpacityMask removed (was from Qt5Compat.GraphicalEffects)
+                                    // Parent Rectangle already has clip: true + radius for rounded corners
 
                                     Image {
                                         id: coverImg
