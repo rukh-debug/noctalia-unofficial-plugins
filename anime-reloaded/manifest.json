@@ -1,0 +1,57 @@
+{
+  "id": "anime-reloaded",
+  "name": "AnimeReloaded",
+  "version": "1.0.0",
+  "minNoctaliaVersion": "3.6.0",
+  "author": "demencia89",
+  "official": false,
+  "license": "MIT",
+  "repository": "https://github.com/demencia89/noctalia-shell-animereloaded-plugin.git",
+  "description": "Hybrid AniList metadata and AllAnime playback plugin for Noctalia.",
+  "tags": [
+    "Bar",
+    "Panel",
+    "Entertainment"
+  ],
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml",
+    "settings": "Settings.qml"
+  },
+  "dependencies": {
+    "plugins": []
+  },
+  "metadata": {
+    "malSync": {
+      "defaultBackendUrl": "https://dns.bogglemind.top:8443",
+      "legacyBackendUrls": [
+        "https://auth.bogglemind.top",
+        "https://auth.bogglemind.top:8443"
+      ]
+    },
+    "defaultSettings": {
+      "mode": "sub",
+      "preferredProvider": "auto",
+      "metadataProvider": "anilist",
+      "streamProvider": "allanime",
+      "librarySchemaVersion": 2,
+      "lastPanelTabIndex": 1,
+      "barWidgetIconName": "device-tv",
+      "barWidgetText": "AnimeReloaded",
+      "barWidgetIconColor": "primary"
+    },
+    "providers": {
+      "metadata": {
+        "default": "anilist",
+        "planned": [
+          "allanime"
+        ]
+      },
+      "stream": {
+        "default": "allanime"
+      },
+      "mappingCacheFile": "anime-reloaded-provider-map.json"
+    }
+  }
+}

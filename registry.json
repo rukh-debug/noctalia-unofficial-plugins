@@ -2,6 +2,23 @@
   "version": 1,
   "plugins": [
     {
+      "id": "anime-reloaded",
+      "name": "AnimeReloaded",
+      "version": "1.0.0",
+      "official": false,
+      "author": "demencia89",
+      "description": "Hybrid AniList metadata and AllAnime playback plugin for Noctalia.",
+      "repository": "https://github.com/demencia89/noctalia-shell-animereloaded-plugin.git",
+      "minNoctaliaVersion": "3.6.0",
+      "license": "MIT",
+      "tags": [
+        "Bar",
+        "Panel",
+        "Entertainment"
+      ],
+      "lastUpdated": "2026-04-16T18:13:38+00:00"
+    },
+    {
       "id": "bitwarden-rbw-noctalia-launcher",
       "name": "Bitwarden RBW Noctalia Launcher",
       "version": "1.2.0",
