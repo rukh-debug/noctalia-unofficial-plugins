@@ -4,7 +4,7 @@
     {
       "id": "anime-reloaded",
       "name": "AnimeReloaded",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "official": false,
       "author": "demencia89",
       "description": "Hybrid AniList metadata and AllAnime playback plugin for Noctalia.",
@@ -16,7 +16,7 @@
         "Panel",
         "Entertainment"
       ],
-      "lastUpdated": "2026-04-17T10:13:18-04:00"
+      "lastUpdated": "2026-04-17T22:34:28-03:00"
     },
     {
       "id": "bitwarden-rbw-noctalia-launcher",

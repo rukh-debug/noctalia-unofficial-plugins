@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.System
 import qs.Services.UI
 import "MalStatus.js" as MalStatus
 import "js/providers.js" as Providers
@@ -28,6 +29,8 @@ Item {
     }
     readonly property string runtimeRoot:
         pluginApi?.manifest?.metadata?.runtimeRoot ?? ""
+    readonly property string defaultAniListRedirectUri:
+        "https://anilist.co/api/v2/oauth/pin"
     readonly property int librarySchemaVersion: 2
 
     function _pathJoin(base, child) {
@@ -70,9 +73,12 @@ Item {
         pluginApi?.manifest?.metadata?.defaultSettings?.streamProvider ||
         pluginApi?.manifest?.metadata?.providers?.stream?.default ||
         "allanime"
+    property var    aniListSync: _normaliseAniListSync(pluginApi?.pluginSettings?.aniListSync)
     property var    malSync: _normaliseMalSync(pluginApi?.pluginSettings?.malSync)
     property var    browseCache: ({})
     property var    detailCache: ({})
+    property bool   panelSettingsOpen: false
+    property string aniListAuthDraft: ""
 
     function _preferredPanelScreen() {
         if (pluginApi?.panelOpenScreen)
@@ -302,6 +308,22 @@ Item {
         }
     }
 
+    function _emptyAniListSync() {
+        return {
+            version: 1,
+            enabled: false,
+            autoPush: false,
+            clientId: "",
+            redirectUri: defaultAniListRedirectUri,
+            accessToken: "",
+            userId: 0,
+            userName: "",
+            userPicture: "",
+            lastSyncAt: 0,
+            lastSyncDirection: ""
+        }
+    }
+
     function _emptyMalSync() {
         return {
             version: 2,
@@ -315,6 +337,24 @@ Item {
             lastSyncAt: 0,
             lastSyncDirection: ""
         }
+    }
+
+    function _normaliseAniListSync(raw) {
+        var source = _deepClone(raw)
+        if (!source || typeof source !== "object" || Array.isArray(source))
+            source = ({})
+        var config = _emptyAniListSync()
+        config.enabled = source.enabled === true
+        config.autoPush = source.autoPush === true
+        config.clientId = String(source.clientId || "").trim()
+        config.redirectUri = defaultAniListRedirectUri
+        config.accessToken = String(source.accessToken || "").trim()
+        config.userId = Number(source.userId || 0)
+        config.userName = String(source.userName || "")
+        config.userPicture = String(source.userPicture || "")
+        config.lastSyncAt = Number(source.lastSyncAt || 0)
+        config.lastSyncDirection = String(source.lastSyncDirection || "")
+        return config
     }
 
     function _normaliseMalSync(raw) {
@@ -357,10 +397,28 @@ Item {
         pluginApi.saveSettings()
     }
 
+    function _saveAniListSyncSettings() {
+        if (!pluginApi) return
+        pluginApi.pluginSettings.aniListSync = _deepClone(aniListSync)
+        pluginApi.saveSettings()
+    }
+
     function _saveMalSyncSettings() {
         if (!pluginApi) return
         pluginApi.pluginSettings.malSync = _deepClone(malSync)
         pluginApi.saveSettings()
+    }
+
+    function setAniListSyncField(key, value) {
+        var next = _normaliseAniListSync(aniListSync)
+        next[key] = value
+        aniListSync = _normaliseAniListSync(next)
+        _saveAniListSyncSettings()
+    }
+
+    function updateAniListSyncConfig(config) {
+        aniListSync = _normaliseAniListSync(config)
+        _saveAniListSyncSettings()
     }
 
     function setMalSyncField(key, value) {
@@ -373,6 +431,26 @@ Item {
     function updateMalSyncConfig(config) {
         malSync = _normaliseMalSync(config)
         _saveMalSyncSettings()
+    }
+
+    function clearAniListSyncSession() {
+        aniListAutoPushTimer.stop()
+        var next = _normaliseAniListSync(aniListSync)
+        next.enabled = false
+        next.accessToken = ""
+        next.userId = 0
+        next.userName = ""
+        next.userPicture = ""
+        next.lastSyncAt = 0
+        next.lastSyncDirection = ""
+        updateAniListSyncConfig(next)
+        aniListSyncError = ""
+        aniListSyncMessage = "Disconnected from AniList."
+        aniListSyncSummary = ({})
+        aniListSyncResults = []
+        aniListAuthDraft = ""
+        _pendingAniListCommand = ""
+        _pendingAniListBrowserAuth = false
     }
 
     function clearMalSyncSession() {
@@ -439,6 +517,172 @@ Item {
         }
 
         return "MyAnimeList sync completed." + suffix
+    }
+
+    function _formatAniListSyncMessage(direction, summary) {
+        var info = summary || ({})
+        var updated = Number(info.updated || 0)
+        var imported = Number(info.imported || 0)
+        var removed = Number(info.removed || 0)
+        var skipped = Number(info.skipped || 0)
+        var failed = Number(info.failed || 0)
+        var suffix = ""
+        if (skipped > 0 || failed > 0) {
+            var parts = []
+            if (skipped > 0)
+                parts.push(String(skipped) + " skipped")
+            if (failed > 0)
+                parts.push(String(failed) + " failed")
+            suffix = " " + parts.join(", ") + "."
+        }
+
+        if (direction === "push") {
+            if (updated <= 0 && failed <= 0)
+                return "AniList is already in sync." + suffix
+            return "Pushed " + _entryCountLabel(updated) + " to AniList." + suffix
+        }
+
+        if (direction === "pull") {
+            if (updated <= 0 && imported <= 0 && failed <= 0)
+                return "AniList is already in sync." + suffix
+            if (updated > 0 && imported > 0)
+                return "Pulled " + _entryCountLabel(updated) + " and imported " + _entryCountLabel(imported) + " from AniList." + suffix
+            if (imported > 0)
+                return "Imported " + _entryCountLabel(imported) + " from AniList." + suffix
+            return "Pulled " + _entryCountLabel(updated) + " from AniList." + suffix
+        }
+
+        if (direction === "delete") {
+            if (removed <= 0 && failed <= 0)
+                return "AniList entry was not removed." + suffix
+            return "Removed " + _entryCountLabel(removed) + " from AniList." + suffix
+        }
+
+        return "AniList sync completed." + suffix
+    }
+
+    function _syncNotificationCommandLabel(command) {
+        var key = String(command || "").trim().toLowerCase()
+        if (key === "push")
+            return "Push"
+        if (key === "pull")
+            return "Pull"
+        if (key === "delete-entry" || key === "delete")
+            return "Removal"
+        if (key === "connect-token")
+            return "Connection"
+        if (key === "refresh")
+            return "Refresh"
+        if (key === "auth-url")
+            return "Login"
+        return "Sync"
+    }
+
+    function _syncNotificationFactLines(summary) {
+        var info = summary || ({})
+        var counts = [
+            { label: "Updated", value: Number(info.updated || 0) },
+            { label: "Imported", value: Number(info.imported || 0) },
+            { label: "Removed", value: Number(info.removed || 0) },
+            { label: "Skipped", value: Number(info.skipped || 0) },
+            { label: "Failed", value: Number(info.failed || 0) }
+        ]
+        var lines = []
+        for (var i = 0; i < counts.length; i++) {
+            var item = counts[i]
+            if (item.value > 0)
+                lines.push(item.label + ": " + String(item.value))
+        }
+        return lines
+    }
+
+    function _syncNotificationResultLine(result) {
+        var item = result || ({})
+        var title = String(item.title || item.id || "Untitled")
+        var reason = String(item.reason || "").trim()
+        var status = String(item.status || "").trim().toLowerCase()
+        if (reason.length > 0)
+            return title + ": " + reason
+        if (status === "updated")
+            return title + ": synced successfully."
+        if (status === "imported")
+            return title + ": imported into the local library."
+        if (status === "removed")
+            return title + ": removed successfully."
+        if (status === "unchanged")
+            return title + ": already aligned."
+        return title
+    }
+
+    function _syncNotificationBody(message, summary, results) {
+        var lines = []
+        var text = String(message || "").trim()
+        var factLines = _syncNotificationFactLines(summary)
+        var issues = (results || []).filter(function(item) {
+            var status = String((item || {}).status || "").trim().toLowerCase()
+            return status === "error" || status === "skipped"
+        }).slice(0, 5)
+        var successes = (results || []).filter(function(item) {
+            var status = String((item || {}).status || "").trim().toLowerCase()
+            return status === "updated" || status === "imported" || status === "removed"
+        }).slice(0, 3)
+
+        if (text.length > 0)
+            lines.push(text)
+        if (factLines.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines = lines.concat(factLines)
+        }
+        if (issues.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines.push("Issues:")
+            for (var i = 0; i < issues.length; i++)
+                lines.push("- " + _syncNotificationResultLine(issues[i]))
+        } else if (successes.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines.push("Recent changes:")
+            for (var j = 0; j < successes.length; j++)
+                lines.push("- " + _syncNotificationResultLine(successes[j]))
+        }
+
+        return lines.join("\n")
+    }
+
+    function _logSyncNotification(serviceName, command, message, summary, results, isError) {
+        var title = String(serviceName || "Sync") + " " + _syncNotificationCommandLabel(command)
+        var body = _syncNotificationBody(message, summary, results)
+        if (body.length === 0)
+            body = title
+        NotificationService.addToHistory({
+            id: "anime-reloaded-sync-" + String(Date.now()) + "-" + String(Math.random()).slice(2, 8),
+            summary: title,
+            summaryMarkdown: title,
+            body: body,
+            bodyMarkdown: body,
+            appName: "AnimeReloaded",
+            urgency: isError === true ? 2 : 1,
+            expireTimeout: 0,
+            timestamp: new Date(),
+            originalImage: "",
+            cachedImage: "",
+            actionsJson: "[]",
+            originalId: 0
+        })
+    }
+
+    function _showSyncFeedback(serviceName, command, message, summary, results, showToast, isError) {
+        if (!showToast)
+            return
+        ToastService.showNotice(
+            "AnimeReloaded",
+            String(message || ""),
+            "device-tv",
+            isError === true ? 4200 : 3200
+        )
+        _logSyncNotification(serviceName, command, message, summary, results, isError)
     }
 
     function _feedMediaId(item) {
@@ -582,6 +826,17 @@ Item {
 
     function _showMetadataId(show) {
         return String(show?.providerRefs?.metadata?.id || show?.id || "")
+    }
+
+    function _showAniListMediaId(show) {
+        var metadataProvider = String(show?.providerRefs?.metadata?.provider || "")
+        var metadataId = String(show?.providerRefs?.metadata?.id || "")
+        if (metadataProvider === "anilist" && /^\d+$/.test(metadataId))
+            return metadataId
+        var showId = String(show?.id || "")
+        if (/^\d+$/.test(showId))
+            return showId
+        return ""
     }
 
     function _showStreamProviderId(show) {
@@ -927,6 +1182,17 @@ Item {
     property var    feedNotificationState: _emptyFeedNotificationState()
     property bool   _pendingStartupFeedToast: false
 
+    // ── AniList sync state ───────────────────────────────────────────────────
+    property bool   isAniListSyncBusy: false
+    property string aniListSyncError: ""
+    property string aniListSyncMessage: ""
+    property var    aniListSyncSummary: ({})
+    property var    aniListSyncResults: []
+    property string _pendingAniListCommand: ""
+    property bool   _pendingAniListShowsToast: true
+    property bool   _suppressAniListAutoPush: false
+    property bool   _pendingAniListBrowserAuth: false
+
     // ── MyAnimeList sync state ───────────────────────────────────────────────
     property bool   isMalSyncBusy: false
     property string malSyncError: ""
@@ -1015,6 +1281,13 @@ Item {
     }
 
     Timer {
+        id: aniListAutoPushTimer
+        interval: 1800
+        repeat: false
+        onTriggered: root.pushAniListSync(false)
+    }
+
+    Timer {
         id: malAutoPushTimer
         interval: 1800
         repeat: false
@@ -1027,9 +1300,21 @@ Item {
         mkdirProc.running = true
     }
 
+    function _aniListSyncReady() {
+        return aniListSync?.enabled === true
+            && String(aniListSync?.accessToken || "").length > 0
+    }
+
     function _malSyncReady() {
         return String(malSync?.backendSessionToken || "").length > 0
             && String(malSync?.userName || "").length > 0
+    }
+
+    function _queueAniListAutoPush() {
+        if (_suppressAniListAutoPush) return
+        if (!(aniListSync?.autoPush === true) || !_aniListSyncReady())
+            return
+        aniListAutoPushTimer.restart()
     }
 
     function _queueMalAutoPush() {
@@ -1100,8 +1385,10 @@ Item {
         pluginApi.saveSettings()
         feedLastFetchedAt = 0
         libraryVersion++  // trigger reactive re-evaluation in views
-        if (skipAutoSync !== true)
+        if (skipAutoSync !== true) {
+            _queueAniListAutoPush()
             _queueMalAutoPush()
+        }
     }
 
     function _loadLibrary() {
@@ -1809,6 +2096,93 @@ Item {
         forgeCacheWriteProc.running = true
     }
 
+    // ── AniList sync result handler ──────────────────────────────────────────
+    function _handleAniListSyncResult(command, d) {
+        if (d.config)
+            root.updateAniListSyncConfig(d.config)
+        root.aniListSyncSummary = d.summary || ({})
+        root.aniListSyncResults = Array.isArray(d.results) ? d.results : []
+        if ((command === "pull" || command === "push") && Array.isArray(d.library)) {
+            root._suppressAniListAutoPush = true
+            root.libraryList = d.library.map(function(entry) {
+                return root._normaliseLibraryEntry(entry)
+            })
+            root._saveLibrary(true)
+            root._suppressAniListAutoPush = false
+            if (command === "pull")
+                root.fetchFollowingFeed(true)
+        }
+
+        var summary = d.summary || ({})
+        if (command === "auth-url" && d.authUrl) {
+            root.aniListSyncMessage = "Opened AniList authorization in the browser. Paste the returned callback URL or access token to finish."
+            Qt.openUrlExternally(d.authUrl)
+        } else if (command === "connect-token") {
+            root._pendingAniListBrowserAuth = false
+            root.aniListAuthDraft = ""
+            root.aniListSyncMessage = "Connected to AniList as " + String(((d || {}).user || {}).name || root.aniListSync.userName || "your account") + "."
+        } else if (command === "refresh") {
+            root.aniListSyncMessage = "Refreshed AniList session."
+        } else if (command === "delete-entry") {
+            var removedTitle = String((d && d.results && d.results.length > 0 ? d.results[0].title : "") || "")
+            root.aniListSyncMessage = removedTitle.length > 0
+                ? ("Removed " + removedTitle + " from AniList.")
+                : root._formatAniListSyncMessage("delete", summary)
+        } else if (command === "push") {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("push", summary)
+        } else if (command === "pull") {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("pull", summary)
+        } else {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("", summary)
+        }
+        root.aniListSyncError = ""
+
+        _showSyncFeedback("AniList", command, root.aniListSyncMessage, summary, root.aniListSyncResults, root._pendingAniListShowsToast, false)
+        root._pendingAniListCommand = ""
+    }
+
+    function _queueAniListCommandJS(command, includeLibrary, extraArgs, showToast) {
+        _pendingAniListCommand = String(command || "")
+        _pendingAniListShowsToast = showToast !== false
+        aniListSyncError = ""
+        aniListSyncMessage = ""
+
+        var config = _normaliseAniListSync(aniListSync)
+        var aniListArgs = { config: config }
+
+        if (includeLibrary)
+            aniListArgs.libraryEntries = libraryList || []
+        if (command === "connect-token")
+            aniListArgs.authResult = (extraArgs || [])[0] || ""
+        if (command === "delete-entry") {
+            aniListArgs.mediaId = (extraArgs || [])[0] || ""
+            aniListArgs.title = (extraArgs || [])[1] || ""
+        }
+
+        isAniListSyncBusy = true
+
+        Providers.sync("anilist", command, aniListArgs, function(err, d) {
+            isAniListSyncBusy = false
+            if (err) {
+                root.aniListSyncError = String(err)
+                root.aniListSyncMessage = ""
+                _showSyncFeedback("AniList", command, root.aniListSyncError, {}, [], root._pendingAniListShowsToast, true)
+                root._pendingAniListCommand = ""
+                if (command === "auth-url")
+                    root._pendingAniListBrowserAuth = false
+                return
+            }
+            if (!d) {
+                root.aniListSyncError = "AniList command did not return any data."
+                root.aniListSyncMessage = ""
+                _showSyncFeedback("AniList", command, root.aniListSyncError, {}, [], root._pendingAniListShowsToast, true)
+                root._pendingAniListCommand = ""
+                return
+            }
+            _handleAniListSyncResult(command, d)
+        })
+    }
+
     // ── MAL sync result handler ──────────────────────────────────────────────
     function _handleMalSyncResult(command, d) {
         if (d.config)
@@ -1851,14 +2225,7 @@ Item {
         }
         root.malSyncError = ""
 
-        if (root._pendingMalShowsToast) {
-            ToastService.showNotice(
-                "AnimeReloaded",
-                root.malSyncMessage,
-                "device-tv",
-                3200
-            )
-        }
+        _showSyncFeedback("MyAnimeList", command, root.malSyncMessage, summary, root.malSyncResults, root._pendingMalShowsToast, false)
         root._pendingMalCommand = ""
     }
 
@@ -1887,6 +2254,7 @@ Item {
             if (err) {
                 root.malSyncError = String(err)
                 root.malSyncMessage = ""
+                _showSyncFeedback("MyAnimeList", command, root.malSyncError, {}, [], root._pendingMalShowsToast, true)
                 root._pendingMalCommand = ""
                 root._pendingMalBrowserAuth = false
                 root._pendingMalBrowserAuthUrl = ""
@@ -1895,6 +2263,7 @@ Item {
             if (!d) {
                 root.malSyncError = "MyAnimeList command did not return any data."
                 root.malSyncMessage = ""
+                _showSyncFeedback("MyAnimeList", command, root.malSyncError, {}, [], root._pendingMalShowsToast, true)
                 root._pendingMalCommand = ""
                 return
             }
@@ -1925,7 +2294,7 @@ Item {
             if (d.config) root.updateMalSyncConfig(d.config)
             root.malSyncMessage = "Connected to MyAnimeList as " + String(((d || {}).user || {}).name || root.malSync.userName || "your account") + "."
             root.malSyncError = ""
-            ToastService.showNotice("AnimeReloaded", root.malSyncMessage, "device-tv", 3200)
+            _showSyncFeedback("MyAnimeList", "connect-token", root.malSyncMessage, {}, [], true, false)
         })
 
         Qt.callLater(function() { Qt.openUrlExternally(authUrl) })
@@ -1963,6 +2332,69 @@ Item {
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
+    function startAniListBrowserAuth() {
+        if (String(aniListSync?.clientId || "").trim().length === 0) {
+            aniListSyncError = "Enter your AniList client id before starting browser login."
+            return
+        }
+        _pendingAniListBrowserAuth = true
+        aniListSyncError = ""
+        aniListSyncMessage = "Opening AniList sign-in..."
+        _queueAniListCommandJS("auth-url", false, [], false)
+    }
+
+    function completeAniListBrowserAuth(authResult, showToast) {
+        if (String(authResult || "").trim().length === 0) {
+            aniListSyncError = "Paste the AniList callback URL or access token first."
+            return
+        }
+        aniListSyncError = ""
+        aniListSyncMessage = "Finishing AniList sign-in..."
+        _queueAniListCommandJS("connect-token", false, [authResult], showToast !== false)
+    }
+
+    function refreshAniListSyncSession(showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect an AniList account before refreshing."
+            return
+        }
+        _queueAniListCommandJS("refresh", false, [], showToast !== false)
+    }
+
+    function pushAniListSync(showToast) {
+        if ((libraryList || []).length === 0) {
+            aniListSyncError = "Your library is empty."
+            return
+        }
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before pushing library progress."
+            return
+        }
+        _queueAniListCommandJS("push", true, [], showToast !== false)
+    }
+
+    function pullAniListSync(showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before pulling progress."
+            return
+        }
+        _queueAniListCommandJS("pull", true, [], showToast !== false)
+    }
+
+    function removeShowFromAniList(show, showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before removing titles from your AniList list."
+            return
+        }
+        var mediaId = _showAniListMediaId(show)
+        if (mediaId.length === 0) {
+            aniListSyncError = "No AniList media id is available for this title."
+            return
+        }
+        var title = String(show?.englishName || show?.name || "")
+        _queueAniListCommandJS("delete-entry", false, [mediaId, title], showToast !== false)
+    }
+
     function startMalBrowserAuth() {
         if (String(malSync?.backendUrl || "").trim().length === 0) {
             malSyncError = "The MyAnimeList backend URL is not configured."

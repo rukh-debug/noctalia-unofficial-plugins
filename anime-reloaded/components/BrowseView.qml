@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Qt5Compat.GraphicalEffects
 import qs.Commons
 import qs.Widgets
 
@@ -879,7 +880,14 @@ Item {
                                     id: titleBar
                                     anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                                     height: titleText.implicitHeight + 14
-                                    color: Color.mSurfaceVariant; radius: 10
+                                    color: Color.mSurfaceVariant
+                                    radius: 10
+
+                                    Rectangle {
+                                        anchors { top: parent.top; left: parent.left; right: parent.right }
+                                        height: parent.radius
+                                        color: parent.color
+                                    }
 
                                     Text {
                                         id: titleText
@@ -900,9 +908,27 @@ Item {
                                 Rectangle {
                                     id: posterWrapper
                                     anchors { top: parent.top; left: parent.left; right: parent.right; bottom: titleBar.top }
-                                    radius: 10; clip: true; color: "transparent"
-                                        // OpacityMask removed (was from Qt5Compat.GraphicalEffects)
-                                    // Parent Rectangle already has clip: true + radius for rounded corners
+                                    radius: 10
+                                    clip: true
+                                    color: "transparent"
+                                    layer.enabled: true
+                                    layer.effect: OpacityMask {
+                                        maskSource: Item {
+                                            width: posterWrapper.width
+                                            height: posterWrapper.height
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                radius: posterWrapper.radius
+                                                color: "black"
+                                            }
+
+                                            Rectangle {
+                                                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                                height: posterWrapper.radius
+                                                color: "black"
+                                            }
+                                        }
+                                    }
 
                                     Image {
                                         id: coverImg

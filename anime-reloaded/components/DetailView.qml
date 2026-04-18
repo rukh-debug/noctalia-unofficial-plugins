@@ -563,6 +563,31 @@ Item {
                     }
 
                     ActionChip {
+                        visible: (anime?.aniListSync?.enabled ?? false)
+                            && anime?.currentAnime != null
+                            && String(anime?._showAniListMediaId(anime.currentAnime) || "").length > 0
+                        text: "Remove AniList"
+                        controlHeight: 22
+                        horizontalPadding: 11
+                        fontPixelSize: 9
+                        letterSpacing: 0.6
+                        baseColor: detailView._withAlpha(detailView._primaryColor(), 0.1)
+                        hoverColor: detailView._withAlpha(detailView._primaryColor(), 0.18)
+                        activeColor: detailView._withAlpha(detailView._primaryColor(), 0.18)
+                        baseBorderColor: detailView._withAlpha(detailView._primaryColor(), 0.24)
+                        hoverBorderColor: detailView._withAlpha(detailView._primaryColor(), 0.42)
+                        activeBorderColor: detailView._withAlpha(detailView._primaryColor(), 0.42)
+                        baseTextColor: detailView._primaryColor()
+                        hoverTextColor: detailView._primaryColor()
+                        activeTextColor: detailView._primaryColor()
+                        activeHoverTextColor: detailView._primaryColor()
+                        onClicked: {
+                            if (!anime?.currentAnime) return
+                            anime.removeShowFromAniList(anime.currentAnime, true)
+                        }
+                    }
+
+                    ActionChip {
                         visible: (anime?.malSync?.enabled ?? false)
                             && anime?.currentAnime != null
                             && String(anime?._showMalId(anime.currentAnime) || "").length > 0

@@ -13,6 +13,7 @@ Qt.include("allanime-provider.js");
 Qt.include("anilist-provider.js");
 Qt.include("mapping-cache.js");
 Qt.include("mal-provider.js");
+Qt.include("anilist-sync-provider.js");
 
 // --- Public dispatcher API ---
 // Mirrors provider_cli.py command structure.
@@ -168,40 +169,75 @@ function sync(providerId, command, args, callback) {
     providerId = (providerId || "").trim();
     command = (command || "").trim();
 
-    if (providerId !== "myanimelist") {
-        callback("Unknown sync provider: " + providerId);
+    if (providerId === "myanimelist") {
+        if (command === "auth-url") {
+            _malBuildAuthUrl(args.config || {}, callback);
+            return;
+        }
+
+        if (command === "listen-exchange") {
+            _malAwaitBrowserLogin(args.config || {}, args.timeout || 240, callback);
+            return;
+        }
+
+        if (command === "refresh") {
+            _malRefreshSession(args.config || {}, callback);
+            return;
+        }
+
+        if (command === "delete-entry") {
+            _malRemoveAnimeEntry(args.config || {}, args.malId || "", args.title || "", callback);
+            return;
+        }
+
+        if (command === "push") {
+            _malPushLibrary(args.config || {}, args.libraryEntries || [], callback);
+            return;
+        }
+
+        if (command === "pull") {
+            _malPullLibrary(args.config || {}, args.libraryEntries || [], callback);
+            return;
+        }
+
+        callback("Unknown sync command: " + command);
         return;
     }
 
-    if (command === "auth-url") {
-        _malBuildAuthUrl(args.config || {}, callback);
+    if (providerId === "anilist") {
+        if (command === "auth-url") {
+            _anilistSyncBuildAuthUrl(args.config || {}, callback);
+            return;
+        }
+
+        if (command === "connect-token") {
+            _anilistSyncConnectToken(args.config || {}, args.authResult || "", callback);
+            return;
+        }
+
+        if (command === "refresh") {
+            _anilistSyncRefresh(args.config || {}, callback);
+            return;
+        }
+
+        if (command === "delete-entry") {
+            _anilistSyncDeleteEntry(args.config || {}, args.mediaId || "", args.title || "", callback);
+            return;
+        }
+
+        if (command === "push") {
+            _anilistSyncPushLibrary(args.config || {}, args.libraryEntries || [], callback);
+            return;
+        }
+
+        if (command === "pull") {
+            _anilistSyncPullLibrary(args.config || {}, args.libraryEntries || [], callback);
+            return;
+        }
+
+        callback("Unknown sync command: " + command);
         return;
     }
 
-    if (command === "listen-exchange") {
-        _malAwaitBrowserLogin(args.config || {}, args.timeout || 240, callback);
-        return;
-    }
-
-    if (command === "refresh") {
-        _malRefreshSession(args.config || {}, callback);
-        return;
-    }
-
-    if (command === "delete-entry") {
-        _malRemoveAnimeEntry(args.config || {}, args.malId || "", args.title || "", callback);
-        return;
-    }
-
-    if (command === "push") {
-        _malPushLibrary(args.config || {}, args.libraryEntries || [], callback);
-        return;
-    }
-
-    if (command === "pull") {
-        _malPullLibrary(args.config || {}, args.libraryEntries || [], callback);
-        return;
-    }
-
-    callback("Unknown sync command: " + command);
+    callback("Unknown sync provider: " + providerId);
 }
