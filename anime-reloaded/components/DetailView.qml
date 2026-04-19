@@ -144,33 +144,38 @@ Item {
     }
 
     function _surfaceColor() {
-        return _themeColor("mSurface", Qt.rgba(0.11, 0.12, 0.14, 1))
+        return _themeColor("mSurface",
+            _themeColor("mBackground", Color.mSurface))
     }
 
     function _surfaceVariantColor() {
         return _themeColor("mSurfaceVariant",
-            Qt.tint(_surfaceColor(), Qt.rgba(1, 1, 1, 0.06)))
+            Qt.tint(_surfaceColor(), _withAlpha(_themeColor("mOnSurface", Color.mOnSurface), 0.06)))
     }
 
     function _primaryColor() {
-        return _themeColor("mPrimary", Qt.rgba(0.53, 0.65, 0.96, 1))
+        return _themeColor("mPrimary",
+            _themeColor("mSecondary", Color.mPrimary))
     }
 
     function _onPrimaryColor() {
-        return _themeColor("mOnPrimary", Qt.rgba(0.06, 0.08, 0.12, 1))
+        return _themeColor("mOnPrimary",
+            _themeColor("mOnSurface", Color.mOnPrimary))
     }
 
     function _errorColor() {
-        return _themeColor("mError", Qt.rgba(0.91, 0.34, 0.33, 1))
+        return _themeColor("mError",
+            _themeColor("mPrimary", Color.mError))
     }
 
     function _tertiaryColor() {
-        return _themeColor("mTertiary", Qt.rgba(0.42, 0.82, 0.75, 1))
+        return _themeColor("mTertiary",
+            _themeColor("mSecondary", Color.mTertiary))
     }
 
     function _onSurfaceVariantColor() {
         return _themeColor("mOnSurfaceVariant",
-            _themeColor("mOnSurface", Qt.rgba(0.92, 0.94, 0.97, 0.84)))
+            _themeColor("mOnSurface", Color.mOnSurfaceVariant))
     }
 
     function _outlineColor() {
@@ -559,6 +564,31 @@ Item {
                             shown: malBadgeArea.containsMouse
                             above: false
                             text: detailMetaFlow.parent.malBadge?.detail || ""
+                        }
+                    }
+
+                    ActionChip {
+                        visible: (anime?.aniListSync?.enabled ?? false)
+                            && anime?.currentAnime != null
+                            && String(anime?._showAniListMediaId(anime.currentAnime) || "").length > 0
+                        text: "Remove AniList"
+                        controlHeight: 22
+                        horizontalPadding: 11
+                        fontPixelSize: 9
+                        letterSpacing: 0.6
+                        baseColor: detailView._withAlpha(detailView._primaryColor(), 0.1)
+                        hoverColor: detailView._withAlpha(detailView._primaryColor(), 0.18)
+                        activeColor: detailView._withAlpha(detailView._primaryColor(), 0.18)
+                        baseBorderColor: detailView._withAlpha(detailView._primaryColor(), 0.24)
+                        hoverBorderColor: detailView._withAlpha(detailView._primaryColor(), 0.42)
+                        activeBorderColor: detailView._withAlpha(detailView._primaryColor(), 0.42)
+                        baseTextColor: detailView._primaryColor()
+                        hoverTextColor: detailView._primaryColor()
+                        activeTextColor: detailView._primaryColor()
+                        activeHoverTextColor: detailView._primaryColor()
+                        onClicked: {
+                            if (!anime?.currentAnime) return
+                            anime.removeShowFromAniList(anime.currentAnime, true)
                         }
                     }
 
@@ -1000,6 +1030,19 @@ Item {
                         (anime?.libraryVersion ?? 0) >= 0
                         ? (anime?.getEpisodeProgressRatio(anime?.currentAnime?.id ?? "", modelData.number) ?? 0)
                         : 0
+                    readonly property string downloadState:
+                        String(anime?.getEpisodeDownloadState(
+                            anime?.currentAnime?.id ?? "",
+                            modelData.number
+                        ) || "").toLowerCase()
+                    readonly property bool isDownloadingThisEpisode:
+                        downloadState === "resolving"
+                        || downloadState === "preparing"
+                        || downloadState === "downloading"
+                    readonly property bool isQueuedForDownload:
+                        downloadState === "queued"
+                    readonly property bool isDownloadPending:
+                        isDownloadingThisEpisode || isQueuedForDownload
 
                     color: isLastWatched
                         ? detailView._withAlpha(detailView._primaryColor(), 0.07)
@@ -1013,7 +1056,7 @@ Item {
                         anchors {
                             bottom: parent.bottom
                             left: parent.left; right: parent.right
-                            leftMargin: 64; rightMargin: 56
+                            leftMargin: 64; rightMargin: 96
                         }
                         height: 1; color: detailView._outlineVariantColor(); opacity: 0.22
                     }
@@ -1024,7 +1067,7 @@ Item {
                             right: parent.right
                             bottom: parent.bottom
                             leftMargin: 64
-                            rightMargin: 56
+                            rightMargin: 96
                             bottomMargin: 3
                         }
                         height: 3
@@ -1135,13 +1178,68 @@ Item {
                                 }
                             }
                         }
+
+                        Item {
+                            id: downloadButton
+                            width: 28
+                            height: 28
+                            Layout.alignment: Qt.AlignVCenter
+                            z: 2
+                            opacity: downloadArea.enabled ? 1 : 0.5
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 14
+                                color: isDownloadPending
+                                    ? detailView._primaryContainerColor()
+                                    : (downloadArea.containsMouse
+                                        ? detailView._withAlpha(detailView._primaryColor(), 0.12)
+                                        : detailView._withAlpha(detailView._surfaceColor(), 0.7))
+                                border.width: 1
+                                border.color: isDownloadPending
+                                    ? detailView._withAlpha(detailView._primaryColor(), 0.5)
+                                    : detailView._withAlpha(detailView._outlineVariantColor(), 0.35)
+                                Behavior on color { ColorAnimation { duration: 130 } }
+                                Behavior on border.color { ColorAnimation { duration: 130 } }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: isDownloadPending ? "…" : "↓"
+                                font.pixelSize: isDownloadPending ? 16 : 14
+                                font.bold: true
+                                color: isDownloadPending
+                                    ? detailView._primaryColor()
+                                    : (downloadArea.containsMouse
+                                        ? detailView._primaryColor()
+                                        : detailView._onSurfaceVariantColor())
+                                Behavior on color { ColorAnimation { duration: 130 } }
+                            }
+
+                            MouseArea {
+                                id: downloadArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                enabled: !isDownloadPending
+                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: function(mouse) {
+                                    mouse.accepted = true
+                                    if (!anime?.currentAnime || isDownloadPending)
+                                        return
+                                    anime.downloadEpisode(
+                                        anime.currentAnime,
+                                        modelData.number
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     MouseArea {
                         id: epRowArea
                         anchors {
                             fill: parent
-                            rightMargin: 52
+                            rightMargin: 92
                         }
                         hoverEnabled: true
                         onClicked: {

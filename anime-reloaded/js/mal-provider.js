@@ -422,7 +422,7 @@ function _malAnilistMediaFromMalId(malId, cache, callback) {
     if (cache[malKey] !== undefined) { callback(null, cache[malKey]); return; }
 
     _alGql(_MAL_Q_ANILIST_MEDIA_BY_MAL_ID, { idMal: parseInt(malKey) }, "mal-sync-anilist-media", 86400, function(err, data) {
-        if (err) { cache[malKey] = {}; callback(null, {}); return; }
+        if (err) { callback(err); return; }
         var media = (data || {}).Media || {};
         cache[malKey] = media;
         callback(null, media);

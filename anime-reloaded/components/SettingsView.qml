@@ -2,13 +2,30 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml
+import Qt5Compat.GraphicalEffects
+import Quickshell
 import qs.Commons
+import qs.Services.UI
+import qs.Widgets
 
 Item {
     id: settingsView
 
     property var pluginApi: null
     readonly property var anime: pluginApi?.mainInstance || null
+    readonly property bool aniListConnected: anime?.aniListSync?.enabled ?? false
+    property string aniListAuthInput: anime?.aniListAuthDraft || ""
+    property string aniListInspectorFilter: ""
+    readonly property var aniListInspectorEntries: {
+        var _ = anime?.aniListSyncSummary ?? {}
+        var __ = anime?.aniListSyncResults ?? []
+        return settingsView._buildAniListInspectorEntries()
+    }
+    readonly property var aniListInspectorCounts: settingsView._aniListInspectorCounts(aniListInspectorEntries)
+    readonly property string effectiveAniListInspectorFilter:
+        settingsView._resolvedAniListInspectorFilter()
+    readonly property var filteredAniListInspectorEntries:
+        settingsView._filterAniListInspectorEntries(aniListInspectorEntries, effectiveAniListInspectorFilter)
     property string malInspectorFilter: ""
     readonly property var malInspectorEntries: {
         var _ = anime?.libraryVersion ?? 0
@@ -27,6 +44,31 @@ Item {
 
     signal backRequested()
 
+    layer.enabled: visible
+    layer.effect: OpacityMask {
+        maskSource: Rectangle {
+            width: settingsView.width
+            height: settingsView.height
+            color: _themeColor("mOnSurface", Color.mOnSurface)
+            topLeftRadius: Style.radiusL
+            topRightRadius: Style.radiusL
+            bottomLeftRadius: 0
+            bottomRightRadius: 0
+        }
+    }
+
+    onAniListConnectedChanged: {
+        if (aniListConnected) {
+            aniListAuthInput = ""
+            if (anime)
+                anime.aniListAuthDraft = ""
+        }
+    }
+
+    onAnimeChanged: {
+        aniListAuthInput = anime?.aniListAuthDraft || ""
+    }
+
     function _themeColor(name, fallback) {
         var value = Color ? Color[name] : null
         return value !== undefined && value !== null ? value : fallback
@@ -42,12 +84,13 @@ Item {
     }
 
     function _surfaceColor() {
-        return _themeColor("mSurface", Qt.rgba(0.11, 0.12, 0.14, 1))
+        return _themeColor("mSurface",
+            _themeColor("mBackground", Color.mSurface))
     }
 
     function _surfaceVariantColor() {
         return _themeColor("mSurfaceVariant",
-            Qt.tint(_surfaceColor(), Qt.rgba(1, 1, 1, 0.06)))
+            Qt.tint(_surfaceColor(), _withAlpha(_themeColor("mOnSurface", Color.mOnSurface), 0.06)))
     }
 
     function _cardFill(tintColor, tintStrength, baseAlpha) {
@@ -67,7 +110,7 @@ Item {
 
     function _cardHighlight(tintColor, alpha) {
         if (!tintColor)
-            return Qt.rgba(1, 1, 1, 0.03)
+            return _withAlpha(_themeColor("mOnSurface", Color.mOnSurface), 0.03)
         return _withAlpha(tintColor, alpha === undefined ? 0.08 : alpha)
     }
 
@@ -85,6 +128,290 @@ Item {
         if (anime?.posterSize === "large")
             return "Roomier covers with stronger visual focus and easier scanning."
         return "Balanced cover density that matches the rest of the panel."
+    }
+
+    function _aniListConnectionSummary() {
+        if (anime?.aniListSync?.enabled)
+            return anime?.aniListSync?.userName
+                ? ("Connected as " + anime.aniListSync.userName)
+                : "Connected and ready to sync"
+        return "Use your AniList client id, then finish login by pasting the returned result once."
+    }
+
+    function _aniListFixedRedirectUri() {
+        return String(anime?.aniListSync?.redirectUri || "https://anilist.co/api/v2/oauth/pin")
+    }
+
+    function _aniListNeedsFinishStep() {
+        if (aniListConnected)
+            return false
+        if ((settingsView.aniListAuthInput || "").trim().length > 0)
+            return true
+        return anime?._pendingAniListBrowserAuth ?? false
+    }
+
+    function _aniListPrimaryActionLabel() {
+        if (aniListConnected)
+            return "Reconnect"
+        if (_aniListNeedsFinishStep())
+            return "Finish Connect"
+        return "Open AniList Login"
+    }
+
+    function _copyToClipboard(text, message) {
+        var value = String(text || "")
+        if (value.length === 0)
+            return
+        Quickshell.clipboardText = value
+        ToastService.showNotice(
+            "AnimeReloaded",
+            String(message || "Copied to clipboard."),
+            "device-tv",
+            2200
+        )
+    }
+
+    function _aniListRemoteStatusLabel(value) {
+        var status = String(value || "").trim().toUpperCase()
+        if (status === "PLANNING")
+            return "Plan To Watch"
+        if (status === "CURRENT")
+            return "Watching"
+        if (status === "COMPLETED")
+            return "Completed"
+        if (status === "PAUSED")
+            return "On Hold"
+        if (status === "DROPPED")
+            return "Dropped"
+        if (status === "REPEATING")
+            return "Repeating"
+        return ""
+    }
+
+    function _aniListResultFacts(result) {
+        var parts = []
+        var watched = Number(result?.watchedEpisodes || 0)
+        var remoteStatus = settingsView._aniListRemoteStatusLabel(result?.remoteStatus)
+        if (remoteStatus.length > 0)
+            parts.push("Status: " + remoteStatus + ".")
+        if (watched > 0)
+            parts.push("AniList progress: " + watched + " episode" + (watched === 1 ? "" : "s") + ".")
+        return parts.join(" ")
+    }
+
+    function _aniListResultDetail(baseDetail, result) {
+        var facts = settingsView._aniListResultFacts(result)
+        if (facts.length === 0)
+            return String(baseDetail || "")
+        return String(baseDetail || "") + " " + facts
+    }
+
+    function _aniListBadgeData(result) {
+        var status = String(result?.status || "").toLowerCase()
+        if (status === "error") {
+            return {
+                key: "error",
+                tone: "error",
+                label: "Failed",
+                detail: String(result?.reason || "The latest AniList sync failed for this title.")
+            }
+        }
+        if (status === "skipped") {
+            return {
+                key: "skipped",
+                tone: "muted",
+                label: "Skipped",
+                detail: String(result?.reason || "The latest AniList sync skipped this title.")
+            }
+        }
+        if (status === "removed") {
+            return {
+                key: "removed",
+                tone: "accent",
+                label: "Removed",
+                detail: "This title was removed from your AniList list in the latest sync action."
+            }
+        }
+        if (status === "imported") {
+            return {
+                key: "imported",
+                tone: "accent",
+                label: "Imported",
+                detail: settingsView._aniListResultDetail(
+                    "This title was imported from your AniList list.",
+                    result
+                )
+            }
+        }
+        if (status === "unchanged") {
+            return {
+                key: "unchanged",
+                tone: "muted",
+                label: "Unchanged",
+                detail: settingsView._aniListResultDetail(
+                    "This title was already aligned with AniList.",
+                    result
+                )
+            }
+        }
+        return {
+            key: "synced",
+            tone: "primary",
+            label: "Synced",
+            detail: settingsView._aniListResultDetail(
+                status === "updated"
+                    ? "The latest AniList sync updated this title successfully."
+                    : "The latest AniList sync completed for this title.",
+                result
+            )
+        }
+    }
+
+    function _aniListInspectorPriority(item) {
+        var key = String(item?.badgeKey || "")
+        if (key === "error")
+            return 0
+        if (key === "skipped")
+            return 1
+        if (key === "synced")
+            return 2
+        if (key === "imported")
+            return 3
+        if (key === "removed")
+            return 4
+        if (key === "unchanged")
+            return 5
+        return 6
+    }
+
+    function _buildAniListInspectorEntries() {
+        var results = anime?.aniListSyncResults || []
+        var items = results.map(function(result) {
+            var badge = settingsView._aniListBadgeData(result)
+            return {
+                id: String(result?.id || ""),
+                title: String(result?.title || "Untitled"),
+                badge: badge,
+                badgeKey: String(badge?.key || "unchanged"),
+                badgeTone: String(badge?.tone || "muted"),
+                remoteStatus: String(result?.remoteStatus || ""),
+                watchedEpisodes: Number(result?.watchedEpisodes || 0),
+                detail: String(badge?.detail || "")
+            }
+        })
+
+        items.sort(function(a, b) {
+            var priorityDelta = settingsView._aniListInspectorPriority(a) - settingsView._aniListInspectorPriority(b)
+            if (priorityDelta !== 0)
+                return priorityDelta
+            return String(a.title || "").localeCompare(String(b.title || ""))
+        })
+        return items
+    }
+
+    function _aniListInspectorCounts(entries) {
+        var list = entries || []
+        var counts = {
+            total: list.length,
+            attention: 0,
+            synced: 0,
+            unchanged: 0
+        }
+
+        for (var i = 0; i < list.length; i++) {
+            var key = String((list[i] || {}).badgeKey || "")
+            if (key === "error" || key === "skipped")
+                counts.attention += 1
+            else if (key === "unchanged")
+                counts.unchanged += 1
+            else
+                counts.synced += 1
+        }
+        return counts
+    }
+
+    function _resolvedAniListInspectorFilter() {
+        if (aniListInspectorFilter === "attention" || aniListInspectorFilter === "synced" || aniListInspectorFilter === "unchanged")
+            return aniListInspectorFilter
+
+        var counts = aniListInspectorCounts || ({})
+        if (Number(counts.attention || 0) > 0)
+            return "attention"
+        if (Number(counts.synced || 0) > 0)
+            return "synced"
+        return "unchanged"
+    }
+
+    function _matchesAniListInspectorFilter(item, filterKey) {
+        var key = String(item?.badgeKey || "")
+        var filter = String(filterKey || "")
+        if (filter === "attention")
+            return key === "error" || key === "skipped"
+        if (filter === "synced")
+            return key !== "error" && key !== "skipped" && key !== "unchanged"
+        if (filter === "unchanged")
+            return key === "unchanged"
+        return true
+    }
+
+    function _filterAniListInspectorEntries(entries, filterKey) {
+        return (entries || []).filter(function(item) {
+            return settingsView._matchesAniListInspectorFilter(item, filterKey)
+        })
+    }
+
+    function _aniListInspectorSummary() {
+        var counts = aniListInspectorCounts || ({})
+        var entries = aniListInspectorEntries || []
+        if (entries.length === 0)
+            return "No AniList sync results are available yet."
+
+        if (Number(counts.attention || 0) > 0)
+            return String(counts.attention) + " title"
+                + (counts.attention === 1 ? "" : "s")
+                + " need attention from the latest AniList sync."
+        if (Number(counts.synced || 0) > 0)
+            return "Latest AniList sync changed "
+                + String(counts.synced) + " title"
+                + (counts.synced === 1 ? "" : "s") + " successfully."
+        return "Latest AniList sync found "
+            + String(counts.unchanged || 0) + " title"
+            + (counts.unchanged === 1 ? "" : "s") + " already aligned."
+    }
+
+    function _aniListInspectorSectionTitle() {
+        if (effectiveAniListInspectorFilter === "attention")
+            return "Needs Attention"
+        if (effectiveAniListInspectorFilter === "synced")
+            return "Recent Changes"
+        return "Already Aligned"
+    }
+
+    function _aniListInspectorSectionHint() {
+        if (effectiveAniListInspectorFilter === "attention")
+            return "These titles are the ones that failed or were skipped in the latest AniList sync. The reason is shown under each title."
+        if (effectiveAniListInspectorFilter === "synced")
+            return "These titles synced successfully in the latest AniList run."
+        return "These titles were checked and did not need any change."
+    }
+
+    function _aniListInspectorEmptyText() {
+        if (effectiveAniListInspectorFilter === "attention")
+            return "No AniList issues are currently listed."
+        if (effectiveAniListInspectorFilter === "synced")
+            return "No successful AniList changes are available to show yet."
+        return "No unchanged AniList entries are available to show yet."
+    }
+
+    function _aniListInspectorMetaText(item) {
+        var parts = []
+        if (String(item?.id || "").length > 0)
+            parts.push("AniList #" + String(item.id))
+        if (String(item?.remoteStatus || "").length > 0)
+            parts.push("Remote: " + settingsView._aniListRemoteStatusLabel(item.remoteStatus))
+        if (Number(item?.watchedEpisodes || 0) > 0)
+            parts.push("AniList watched " + String(item.watchedEpisodes))
+        return parts.join(" · ")
     }
 
     function _malConnectionSummary() {
@@ -484,7 +811,7 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // ── Header ────────────────────────────────────────────────────────────
+            // ── Header ────────────────────────────────────────────────────────────
         Rectangle {
             Layout.fillWidth: true
             height: 68
@@ -622,7 +949,7 @@ Item {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: "Refine panel density, keep browsing comfortable, and manage MyAnimeList sync without leaving the plugin."
+                                    text: "Refine panel density, keep browsing comfortable, and manage AniList or MyAnimeList sync without leaving the plugin."
                                     wrapMode: Text.Wrap
                                     lineHeight: 1.35
                                     font.pixelSize: 11
@@ -665,6 +992,12 @@ Item {
                                 label: "Posters " + String(anime?.posterSize || "medium")
                                 toneColor: Color.mPrimary
                                 textColor: Color.mPrimary
+                            }
+
+                            SummaryPill {
+                                label: anime?.aniListSync?.enabled ? "AniList connected" : "AniList optional"
+                                toneColor: anime?.aniListSync?.enabled ? Color.mPrimary : Color.mOnSurfaceVariant
+                                textColor: anime?.aniListSync?.enabled ? Color.mPrimary : Color.mOnSurfaceVariant
                             }
 
                             SummaryPill {
@@ -834,6 +1167,122 @@ Item {
                     }
 
                     SettingsCard {
+                        width: parent.width
+                        tintColor: Color.mPrimary
+                        tintStrength: 0.06
+
+                        Row {
+                            spacing: 10
+
+                            Rectangle {
+                                width: 30
+                                height: 30
+                                radius: 15
+                                color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "↓"
+                                    font.pixelSize: 13
+                                    color: Color.mPrimary
+                                }
+                            }
+
+                            Column {
+                                spacing: 2
+
+                                Text {
+                                    text: "Episode Downloads"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: Color.mOnSurface
+                                }
+
+                                Text {
+                                    text: "Pick a folder for saved episodes. Leave it empty to keep using the default AnimeReloaded downloads folder."
+                                    font.pixelSize: 11
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.72
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                        }
+
+                        Column {
+                            width: parent.width
+                            spacing: 6
+
+                            Text {
+                                text: "Download Folder"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: Color.mOnSurface
+                            }
+
+                            SettingTextField {
+                                width: parent.width
+                                value: anime?.episodeDownloadPath || ""
+                                placeholderText: anime?.defaultEpisodeDownloadPath || ""
+                                onTextEdited: function(text) {
+                                    if (anime)
+                                        anime.setSetting("episodeDownloadPath", text)
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: "Current location: " + String(anime?.effectiveEpisodeDownloadPath || "")
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.35
+                            font.pixelSize: 10
+                            color: Color.mOnSurfaceVariant
+                            opacity: 0.74
+                        }
+
+                        Flow {
+                            width: parent.width
+                            spacing: 8
+
+                            ActionChip {
+                                text: "Choose Folder"
+                                leadingText: "↓"
+                                onClicked: downloadFolderPicker.openFilePicker()
+                            }
+
+                            ActionChip {
+                                text: "Use Default"
+                                leadingText: "↺"
+                                visible: String(anime?.episodeDownloadPath || "").trim().length > 0
+                                onClicked: if (anime) anime.setSetting("episodeDownloadPath", "")
+                            }
+                        }
+
+                        Text {
+                            visible: anime?.isDownloadingEpisode ?? false
+                            width: parent.width
+                            text: "A download is currently in progress."
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.35
+                            font.pixelSize: 10
+                            color: Color.mPrimary
+                            opacity: 0.9
+                        }
+
+                        NFilePicker {
+                            id: downloadFolderPicker
+                            title: "Select episode download folder"
+                            initialPath: anime?.effectiveEpisodeDownloadPath || anime?.defaultEpisodeDownloadPath || ""
+                            selectionMode: "folders"
+
+                            onAccepted: function(paths) {
+                                if (paths.length > 0 && anime)
+                                    anime.setSetting("episodeDownloadPath", paths[0])
+                            }
+                        }
+                    }
+
+                    SettingsCard {
                         visible: false  // Hidden for now; keep mirror preference wiring intact.
                         width: parent.width
                         tintColor: Color.mPrimary
@@ -898,6 +1347,649 @@ Item {
                                         text: modelData.label
                                         active: anime?.preferredProvider === modelData.value
                                         onClicked: if (anime) anime.setSetting("preferredProvider", modelData.value)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        width: parent.width
+                        tintColor: anime?.aniListSync?.enabled ? Color.mPrimary : Color.mSecondary
+                        tintStrength: anime?.aniListSync?.enabled ? 0.1 : 0.07
+
+                        Column {
+                            width: parent.width
+                            spacing: 14
+
+                            RowLayout {
+                                width: parent.width
+                                spacing: 10
+
+                                Rectangle {
+                                    width: 28
+                                    height: 28
+                                    radius: 14
+                                    color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "A"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: Color.mPrimary
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Text {
+                                        text: "AniList Sync"
+                                        font.pixelSize: 14
+                                        font.bold: true
+                                        color: Color.mOnSurface
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "AnimeReloaded already uses AniList metadata. This section adds direct account sync so your local library can pull, push, and import progress against your AniList account."
+                                        wrapMode: Text.Wrap
+                                        lineHeight: 1.35
+                                        font.pixelSize: 11
+                                        color: Color.mOnSurfaceVariant
+                                        opacity: 0.76
+                                    }
+                                }
+                            }
+
+                            Flow {
+                                width: parent.width
+                                spacing: 8
+
+                                SummaryPill {
+                                    label: settingsView._aniListConnectionSummary()
+                                    maxWidth: settingsView.wideLayout ? 340 : Math.max(180, parent.width - 12)
+                                    toneColor: anime?.aniListSync?.enabled ? Color.mPrimary : Color.mSecondary
+                                    textColor: anime?.aniListSync?.enabled ? Color.mPrimary : Color.mOnSurface
+                                }
+
+                                SummaryPill {
+                                    label: anime?.aniListSync?.autoPush ? "Auto Push enabled" : "Manual push"
+                                    toneColor: anime?.aniListSync?.autoPush ? Color.mPrimary : Color.mOnSurfaceVariant
+                                    textColor: anime?.aniListSync?.autoPush ? Color.mPrimary : Color.mOnSurfaceVariant
+                                }
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                radius: 18
+                                color: settingsView._cardFill(
+                                    anime?.aniListSync?.enabled ? Color.mPrimary : Color.mSecondary,
+                                    anime?.aniListSync?.enabled ? 0.08 : 0.06,
+                                    0.92
+                                )
+                                border.width: 1
+                                border.color: settingsView._cardBorder(
+                                    anime?.aniListSync?.enabled ? Color.mPrimary : Color.mSecondary,
+                                    0.16
+                                )
+                                implicitHeight: aniListStatusColumn.implicitHeight + 22
+
+                                Column {
+                                    id: aniListStatusColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 12
+
+                                    SettingsInsetPanel {
+                                        width: parent.width
+                                        tintColor: anime?.aniListSync?.enabled ? Color.mPrimary : Color.mSecondary
+                                        tintStrength: anime?.aniListSync?.enabled ? 0.08 : 0.05
+                                        baseAlpha: 0.92
+                                        contentSpacing: 10
+
+                                        Text {
+                                            text: "Connection"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                            color: Color.mOnSurface
+                                        }
+
+                                        Column {
+                                            width: parent.width
+                                            spacing: 6
+
+                                            Text {
+                                                text: "AniList Client ID"
+                                                font.pixelSize: 10
+                                                font.bold: true
+                                                color: Color.mOnSurface
+                                            }
+
+                                            SettingTextField {
+                                                width: parent.width
+                                                value: anime?.aniListSync?.clientId || ""
+                                                placeholderText: "Required for browser login"
+                                                onTextEdited: function(text) {
+                                                    if (anime) anime.setAniListSyncField("clientId", text)
+                                                }
+                                            }
+                                        }
+
+                                        Flow {
+                                            width: parent.width
+                                            spacing: 8
+
+                                            SummaryPill {
+                                                label: "Redirect URI"
+                                                toneColor: Color.mOnSurfaceVariant
+                                                textColor: Color.mOnSurfaceVariant
+                                            }
+
+                                            Rectangle {
+                                                id: aniListRedirectPill
+                                                width: Math.min(
+                                                    settingsView.wideLayout ? 360 : Math.max(200, parent.width - 12),
+                                                    aniListRedirectText.implicitWidth + 26
+                                                )
+                                                implicitHeight: 30
+                                                radius: 15
+                                                clip: true
+                                                color: aniListRedirectArea.containsMouse
+                                                    ? Qt.tint(
+                                                        Qt.rgba(settingsView._surfaceColor().r, settingsView._surfaceColor().g, settingsView._surfaceColor().b, 0.92),
+                                                        settingsView._withAlpha(Color.mPrimary, 0.18)
+                                                    )
+                                                    : Qt.tint(
+                                                        Qt.rgba(settingsView._surfaceColor().r, settingsView._surfaceColor().g, settingsView._surfaceColor().b, 0.9),
+                                                        settingsView._withAlpha(Color.mPrimary, 0.14)
+                                                    )
+                                                border.width: 1
+                                                border.color: settingsView._withAlpha(Color.mPrimary, aniListRedirectArea.containsMouse ? 0.34 : 0.24)
+
+                                                Behavior on color { ColorAnimation { duration: 140 } }
+                                                Behavior on border.color { ColorAnimation { duration: 140 } }
+
+                                                Text {
+                                                    id: aniListRedirectText
+                                                    anchors {
+                                                        left: parent.left
+                                                        right: copyHint.left
+                                                        verticalCenter: parent.verticalCenter
+                                                        leftMargin: 10
+                                                        rightMargin: 8
+                                                    }
+                                                    text: settingsView._aniListFixedRedirectUri()
+                                                    elide: Text.ElideRight
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mPrimary
+                                                }
+
+                                                Text {
+                                                    id: copyHint
+                                                    anchors {
+                                                        right: parent.right
+                                                        verticalCenter: parent.verticalCenter
+                                                        rightMargin: 9
+                                                    }
+                                                    text: "Copy"
+                                                    font.pixelSize: 10
+                                                    font.bold: true
+                                                    color: Color.mPrimary
+                                                    opacity: 0.82
+                                                }
+
+                                                MouseArea {
+                                                    id: aniListRedirectArea
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: settingsView._copyToClipboard(
+                                                        settingsView._aniListFixedRedirectUri(),
+                                                        "AniList redirect URI copied."
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Column {
+                                            width: parent.width
+                                            spacing: 6
+                                            visible: settingsView._aniListNeedsFinishStep()
+
+                                            Text {
+                                                text: "Callback URL or Access Token"
+                                                font.pixelSize: 10
+                                                font.bold: true
+                                                color: Color.mOnSurface
+                                            }
+
+                                            SettingTextField {
+                                                width: parent.width
+                                                value: settingsView.aniListAuthInput
+                                                placeholderText: "Paste the returned AniList callback URL or raw token"
+                                                onTextEdited: function(text) {
+                                                    settingsView.aniListAuthInput = text
+                                                    if (anime)
+                                                        anime.aniListAuthDraft = text
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: anime?.aniListSync?.enabled
+                                                ? ("Connected" + (anime?.aniListSync?.userName ? " as " + anime.aniListSync.userName : "") + ". You can reconnect any time with a fresh token.")
+                                                : (settingsView._aniListNeedsFinishStep()
+                                                    ? "AniList login is open. When AniList shows the callback URL or access token, paste it above and finish the connection."
+                                                    : "Create an AniList app, set the redirect URI shown above, enter its client id here, then start the browser login.")
+                                            wrapMode: Text.Wrap
+                                            lineHeight: 1.35
+                                            font.pixelSize: 10
+                                            color: Color.mOnSurfaceVariant
+                                            opacity: 0.72
+                                        }
+
+                                        Flow {
+                                            width: parent.width
+                                            spacing: 8
+
+                                            ActionChip {
+                                                text: settingsView._aniListPrimaryActionLabel()
+                                                leadingText: "A"
+                                                enabled: !(anime?.isAniListSyncBusy ?? false)
+                                                onClicked: {
+                                                    if (!anime) return
+                                                    if (settingsView._aniListNeedsFinishStep())
+                                                        anime.completeAniListBrowserAuth(settingsView.aniListAuthInput, true)
+                                                    else {
+                                                        settingsView.aniListAuthInput = ""
+                                                        anime.aniListAuthDraft = ""
+                                                        anime.startAniListBrowserAuth()
+                                                    }
+                                                }
+                                            }
+
+                                            ActionChip {
+                                                visible: !aniListConnected && settingsView._aniListNeedsFinishStep()
+                                                text: "Open Again"
+                                                leadingText: "↗"
+                                                enabled: !(anime?.isAniListSyncBusy ?? false)
+                                                onClicked: {
+                                                    settingsView.aniListAuthInput = ""
+                                                    if (anime)
+                                                        anime.aniListAuthDraft = ""
+                                                    if (anime) anime.startAniListBrowserAuth()
+                                                }
+                                            }
+
+                                            ActionChip {
+                                                text: "Refresh"
+                                                leadingText: "↻"
+                                                enabled: (anime?.aniListSync?.enabled ?? false)
+                                                    && !(anime?.isAniListSyncBusy ?? false)
+                                                onClicked: if (anime) anime.refreshAniListSyncSession(true)
+                                            }
+
+                                            ActionChip {
+                                                text: "Disconnect"
+                                                leadingText: "✕"
+                                                visible: anime?.aniListSync?.enabled ?? false
+                                                enabled: (anime?.aniListSync?.enabled ?? false)
+                                                    && !(anime?.isAniListSyncBusy ?? false)
+                                                baseColor: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.86)
+                                                hoverColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
+                                                hoverBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.4)
+                                                hoverTextColor: Color.mError
+                                                onClicked: if (anime) anime.clearAniListSyncSession()
+                                            }
+                                        }
+
+                                        Text {
+                                            visible: (anime?.aniListSyncMessage || "").length > 0
+                                            width: parent.width
+                                            text: anime?.aniListSyncMessage || ""
+                                            wrapMode: Text.Wrap
+                                            font.pixelSize: 11
+                                            color: Color.mPrimary
+                                        }
+
+                                        Text {
+                                            visible: (anime?.aniListSyncError || "").length > 0
+                                            width: parent.width
+                                            text: anime?.aniListSyncError || ""
+                                            wrapMode: Text.Wrap
+                                            font.pixelSize: 11
+                                            color: Color.mError
+                                        }
+                                    }
+
+                                    GridLayout {
+                                        width: parent.width
+                                        columns: settingsView.wideLayout ? 2 : 1
+                                        columnSpacing: 12
+                                        rowSpacing: 12
+
+                                        SettingsInsetPanel {
+                                            Layout.fillWidth: true
+                                            Layout.alignment: Qt.AlignTop
+                                            tintColor: Color.mPrimary
+                                            tintStrength: 0.05
+                                            baseAlpha: 0.9
+                                            contentSpacing: 8
+
+                                            Text {
+                                                text: "Sync Mode"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                                color: Color.mOnSurface
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: "Choose whether local progress should wait for a manual push or update AniList automatically after watch changes."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
+                                                color: Color.mOnSurfaceVariant
+                                                opacity: 0.72
+                                            }
+
+                                            Flow {
+                                                width: parent.width
+                                                spacing: 10
+
+                                                Repeater {
+                                                    model: [
+                                                        { label: "Manual", value: false },
+                                                        { label: "Auto Push", value: true }
+                                                    ]
+
+                                                    delegate: SettingChoiceButton {
+                                                        text: modelData.label
+                                                        active: (anime?.aniListSync?.autoPush === true) === modelData.value
+                                                        onClicked: if (anime) anime.setAniListSyncField("autoPush", modelData.value)
+                                                    }
+                                                }
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: anime?.aniListSync?.autoPush
+                                                    ? "Auto Push sends local watch changes to AniList after a short delay. Pulls and imports never push back automatically."
+                                                    : "Manual only updates AniList when you press Push To AniList."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
+                                                color: Color.mOnSurfaceVariant
+                                                opacity: 0.7
+                                            }
+                                        }
+
+                                        SettingsInsetPanel {
+                                            Layout.fillWidth: true
+                                            Layout.alignment: Qt.AlignTop
+                                            tintColor: anime?.aniListSync?.enabled ? Color.mPrimary : Color.mSecondary
+                                            tintStrength: anime?.aniListSync?.enabled ? 0.06 : 0.05
+                                            baseAlpha: 0.9
+                                            contentSpacing: 8
+
+                                            Text {
+                                                text: "Sync Actions"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                                color: Color.mOnSurface
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: "Pull imports remote progress and new AniList entries. Push sends your local progress back to AniList."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
+                                                color: Color.mOnSurfaceVariant
+                                                opacity: 0.72
+                                            }
+
+                                            Flow {
+                                                width: parent.width
+                                                spacing: 10
+
+                                                ActionChip {
+                                                    text: "Pull From AniList"
+                                                    leadingText: "↓"
+                                                    enabled: !(anime?.isAniListSyncBusy ?? false)
+                                                    onClicked: if (anime) anime.pullAniListSync(true)
+                                                }
+
+                                                ActionChip {
+                                                    text: "Push To AniList"
+                                                    leadingText: "↑"
+                                                    enabled: !(anime?.isAniListSyncBusy ?? false)
+                                                    onClicked: if (anime) anime.pushAniListSync(true)
+                                                }
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: anime?.aniListSync?.lastSyncAt
+                                                    ? ("Last " + (anime?.aniListSync?.lastSyncDirection || "sync") + " · " + new Date(Number(anime.aniListSync.lastSyncAt) * 1000).toLocaleString())
+                                                    : "No successful AniList sync yet."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
+                                                color: Color.mOnSurfaceVariant
+                                                opacity: 0.68
+                                            }
+                                        }
+                                    }
+
+                                    SettingsInsetPanel {
+                                        width: parent.width
+                                        visible: (settingsView.aniListInspectorEntries || []).length > 0
+                                        tintColor: settingsView.effectiveAniListInspectorFilter === "attention"
+                                            ? Color.mError
+                                            : (settingsView.effectiveAniListInspectorFilter === "synced"
+                                                ? Color.mPrimary
+                                                : Color.mSecondary)
+                                        tintStrength: settingsView.effectiveAniListInspectorFilter === "attention" ? 0.06 : 0.05
+                                        baseAlpha: 0.9
+                                        contentSpacing: 10
+
+                                        Text {
+                                            text: "Latest AniList Sync"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                            color: Color.mOnSurface
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: settingsView._aniListInspectorSummary()
+                                            wrapMode: Text.Wrap
+                                            lineHeight: 1.35
+                                            font.pixelSize: 10
+                                            color: Color.mOnSurfaceVariant
+                                            opacity: 0.74
+                                        }
+
+                                        Flow {
+                                            width: parent.width
+                                            spacing: 8
+
+                                            Repeater {
+                                                model: [
+                                                    {
+                                                        key: "attention",
+                                                        label: "Attention " + String(settingsView.aniListInspectorCounts.attention || 0)
+                                                    },
+                                                    {
+                                                        key: "synced",
+                                                        label: "Synced " + String(settingsView.aniListInspectorCounts.synced || 0)
+                                                    },
+                                                    {
+                                                        key: "unchanged",
+                                                        label: "Unchanged " + String(settingsView.aniListInspectorCounts.unchanged || 0)
+                                                    }
+                                                ]
+
+                                                delegate: SettingChoiceButton {
+                                                    text: modelData.label
+                                                    active: settingsView.effectiveAniListInspectorFilter === modelData.key
+                                                    minWidth: 94
+                                                    controlHeight: 30
+                                                    fontPixelSize: 11
+                                                    onClicked: settingsView.aniListInspectorFilter = modelData.key
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: parent.width
+                                            radius: 16
+                                            color: settingsView.effectiveAniListInspectorFilter === "attention"
+                                                ? settingsView._malToneFill("error")
+                                                : (settingsView.effectiveAniListInspectorFilter === "synced"
+                                                    ? settingsView._malToneFill("primary")
+                                                    : settingsView._malToneFill())
+                                            border.width: 1
+                                            border.color: settingsView.effectiveAniListInspectorFilter === "attention"
+                                                ? settingsView._malToneBorder("error")
+                                                : (settingsView.effectiveAniListInspectorFilter === "synced"
+                                                    ? settingsView._malToneBorder("primary")
+                                                    : settingsView._malToneBorder())
+                                            implicitHeight: aniListInspectorFocusColumn.implicitHeight + 18
+
+                                            Column {
+                                                id: aniListInspectorFocusColumn
+                                                anchors.fill: parent
+                                                anchors.margins: 10
+                                                spacing: 4
+
+                                                Text {
+                                                    text: settingsView._aniListInspectorSectionTitle()
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mOnSurface
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: settingsView._aniListInspectorSectionHint()
+                                                    wrapMode: Text.Wrap
+                                                    lineHeight: 1.35
+                                                    font.pixelSize: 10
+                                                    color: Color.mOnSurfaceVariant
+                                                    opacity: 0.8
+                                                }
+                                            }
+                                        }
+
+                                        Column {
+                                            width: parent.width
+                                            spacing: 8
+
+                                            Repeater {
+                                                model: settingsView.filteredAniListInspectorEntries.slice(0, 8)
+
+                                                delegate: Rectangle {
+                                                    width: parent.width
+                                                    radius: 16
+                                                    color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.9)
+                                                    border.width: 1
+                                                    border.color: _withAlpha(_outlineVariantColor(), 0.34)
+                                                    implicitHeight: aniListInspectorEntryColumn.implicitHeight + 18
+
+                                                    Column {
+                                                        id: aniListInspectorEntryColumn
+                                                        anchors.fill: parent
+                                                        anchors.margins: 10
+                                                        spacing: 6
+
+                                                        Row {
+                                                            width: parent.width
+                                                            spacing: 8
+
+                                                            Rectangle {
+                                                                id: aniListInspectorStatusChip
+                                                                width: aniListInspectorStatusLabel.implicitWidth + 16
+                                                                height: 24
+                                                                radius: 12
+                                                                color: settingsView._malToneFill(modelData.badgeTone, true)
+                                                                border.width: 1
+                                                                border.color: settingsView._malToneBorder(modelData.badgeTone)
+
+                                                                Text {
+                                                                    id: aniListInspectorStatusLabel
+                                                                    anchors.centerIn: parent
+                                                                    text: modelData.badge?.label || ""
+                                                                    font.pixelSize: 10
+                                                                    font.bold: true
+                                                                    color: settingsView._malToneText(modelData.badgeTone)
+                                                                }
+                                                            }
+
+                                                            Text {
+                                                                width: Math.max(0, parent.width - aniListInspectorStatusChip.width - 12)
+                                                                text: modelData.title || "Untitled"
+                                                                elide: Text.ElideRight
+                                                                font.pixelSize: 11
+                                                                font.bold: true
+                                                                color: Color.mOnSurface
+                                                            }
+                                                        }
+
+                                                        Text {
+                                                            width: parent.width
+                                                            visible: String(settingsView._aniListInspectorMetaText(modelData)).length > 0
+                                                            wrapMode: Text.Wrap
+                                                            lineHeight: 1.3
+                                                            font.pixelSize: 10
+                                                            color: Color.mOnSurfaceVariant
+                                                            opacity: 0.78
+                                                            text: settingsView._aniListInspectorMetaText(modelData)
+                                                        }
+
+                                                        Text {
+                                                            width: parent.width
+                                                            visible: String(modelData.detail || "").length > 0
+                                                            wrapMode: Text.Wrap
+                                                            lineHeight: 1.3
+                                                            font.pixelSize: 10
+                                                            color: Color.mOnSurfaceVariant
+                                                            opacity: 0.72
+                                                            text: modelData.detail || ""
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            visible: settingsView.filteredAniListInspectorEntries.length === 0
+                                            width: parent.width
+                                            text: settingsView._aniListInspectorEmptyText()
+                                            wrapMode: Text.Wrap
+                                            lineHeight: 1.35
+                                            font.pixelSize: 10
+                                            color: Color.mOnSurfaceVariant
+                                            opacity: 0.72
+                                        }
+
+                                        Text {
+                                            readonly property int extraCount:
+                                                Math.max(0, settingsView.filteredAniListInspectorEntries.length - 8)
+                                            visible: extraCount > 0
+                                            text: "+" + String(extraCount) + " more title"
+                                                + (extraCount === 1 ? "" : "s")
+                                                + " in " + settingsView._aniListInspectorSectionTitle().toLowerCase()
+                                            font.pixelSize: 10
+                                            color: Color.mOnSurfaceVariant
+                                            opacity: 0.72
+                                        }
                                     }
                                 }
                             }

@@ -1,7 +1,9 @@
 import QtQuick
+import QtCore
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.System
 import qs.Services.UI
 import "MalStatus.js" as MalStatus
 import "js/providers.js" as Providers
@@ -28,6 +30,8 @@ Item {
     }
     readonly property string runtimeRoot:
         pluginApi?.manifest?.metadata?.runtimeRoot ?? ""
+    readonly property string defaultAniListRedirectUri:
+        "https://anilist.co/api/v2/oauth/pin"
     readonly property int librarySchemaVersion: 2
 
     function _pathJoin(base, child) {
@@ -42,6 +46,40 @@ Item {
 
     function _runtimePath(relativePath) {
         return _pathJoin(_pathJoin(pluginApi?.pluginDir ?? "", runtimeRoot), relativePath)
+    }
+
+    function _localPathFromUrl(value) {
+        var text = String(value || "").trim()
+        if (text.indexOf("file://localhost/") === 0)
+            text = text.substring("file://localhost".length)
+        else if (text.indexOf("file://") === 0)
+            text = text.substring("file://".length)
+        return decodeURIComponent(text)
+    }
+
+    function _normaliseDirectoryPath(value) {
+        var text = String(value || "").trim()
+        if (text.length === 0)
+            return ""
+        if (text.indexOf("file://") === 0)
+            text = _localPathFromUrl(text)
+        text = text.replace(/\/+$/, "")
+        if (text.length === 0)
+            return "/"
+        return text
+    }
+
+    function _defaultDownloadsRoot() {
+        var locations = StandardPaths.standardLocations(StandardPaths.DownloadLocation)
+        if (locations && locations.length > 0 && String(locations[0] || "").length > 0)
+            return String(locations[0])
+        var home = String(StandardPaths.writableLocation(StandardPaths.HomeLocation) || "")
+        return home.length > 0 ? _pathJoin(home, "Downloads") : ""
+    }
+
+    function _buildDefaultEpisodeDownloadPath() {
+        var base = _normaliseDirectoryPath(_defaultDownloadsRoot())
+        return base.length > 0 ? _pathJoin(base, "AnimeReloaded") : ""
     }
 
     readonly property string luaPath:
@@ -70,9 +108,24 @@ Item {
         pluginApi?.manifest?.metadata?.defaultSettings?.streamProvider ||
         pluginApi?.manifest?.metadata?.providers?.stream?.default ||
         "allanime"
+    property string episodeDownloadPath:
+        _normaliseDirectoryPath(pluginApi?.pluginSettings?.episodeDownloadPath || "")
+    readonly property string defaultEpisodeDownloadPath:
+        _buildDefaultEpisodeDownloadPath()
+    readonly property string effectiveEpisodeDownloadPath:
+        episodeDownloadPath.length > 0 ? episodeDownloadPath : defaultEpisodeDownloadPath
+    property var    aniListSync: _normaliseAniListSync(pluginApi?.pluginSettings?.aniListSync)
     property var    malSync: _normaliseMalSync(pluginApi?.pluginSettings?.malSync)
     property var    browseCache: ({})
     property var    detailCache: ({})
+    property bool   panelSettingsOpen: false
+    property string aniListAuthDraft: ""
+    property bool   isDownloadingEpisode: false
+    property string downloadingShowId: ""
+    property string downloadingEpisodeNumber: ""
+    property string activeDownloadStatusId: ""
+    property string cancellingDownloadStatusId: ""
+    property var    episodeDownloadQueue: []
 
     function _preferredPanelScreen() {
         if (pluginApi?.panelOpenScreen)
@@ -302,6 +355,22 @@ Item {
         }
     }
 
+    function _emptyAniListSync() {
+        return {
+            version: 1,
+            enabled: false,
+            autoPush: false,
+            clientId: "",
+            redirectUri: defaultAniListRedirectUri,
+            accessToken: "",
+            userId: 0,
+            userName: "",
+            userPicture: "",
+            lastSyncAt: 0,
+            lastSyncDirection: ""
+        }
+    }
+
     function _emptyMalSync() {
         return {
             version: 2,
@@ -315,6 +384,24 @@ Item {
             lastSyncAt: 0,
             lastSyncDirection: ""
         }
+    }
+
+    function _normaliseAniListSync(raw) {
+        var source = _deepClone(raw)
+        if (!source || typeof source !== "object" || Array.isArray(source))
+            source = ({})
+        var config = _emptyAniListSync()
+        config.enabled = source.enabled === true
+        config.autoPush = source.autoPush === true
+        config.clientId = String(source.clientId || "").trim()
+        config.redirectUri = defaultAniListRedirectUri
+        config.accessToken = String(source.accessToken || "").trim()
+        config.userId = Number(source.userId || 0)
+        config.userName = String(source.userName || "")
+        config.userPicture = String(source.userPicture || "")
+        config.lastSyncAt = Number(source.lastSyncAt || 0)
+        config.lastSyncDirection = String(source.lastSyncDirection || "")
+        return config
     }
 
     function _normaliseMalSync(raw) {
@@ -357,10 +444,28 @@ Item {
         pluginApi.saveSettings()
     }
 
+    function _saveAniListSyncSettings() {
+        if (!pluginApi) return
+        pluginApi.pluginSettings.aniListSync = _deepClone(aniListSync)
+        pluginApi.saveSettings()
+    }
+
     function _saveMalSyncSettings() {
         if (!pluginApi) return
         pluginApi.pluginSettings.malSync = _deepClone(malSync)
         pluginApi.saveSettings()
+    }
+
+    function setAniListSyncField(key, value) {
+        var next = _normaliseAniListSync(aniListSync)
+        next[key] = value
+        aniListSync = _normaliseAniListSync(next)
+        _saveAniListSyncSettings()
+    }
+
+    function updateAniListSyncConfig(config) {
+        aniListSync = _normaliseAniListSync(config)
+        _saveAniListSyncSettings()
     }
 
     function setMalSyncField(key, value) {
@@ -373,6 +478,26 @@ Item {
     function updateMalSyncConfig(config) {
         malSync = _normaliseMalSync(config)
         _saveMalSyncSettings()
+    }
+
+    function clearAniListSyncSession() {
+        aniListAutoPushTimer.stop()
+        var next = _normaliseAniListSync(aniListSync)
+        next.enabled = false
+        next.accessToken = ""
+        next.userId = 0
+        next.userName = ""
+        next.userPicture = ""
+        next.lastSyncAt = 0
+        next.lastSyncDirection = ""
+        updateAniListSyncConfig(next)
+        aniListSyncError = ""
+        aniListSyncMessage = "Disconnected from AniList."
+        aniListSyncSummary = ({})
+        aniListSyncResults = []
+        aniListAuthDraft = ""
+        _pendingAniListCommand = ""
+        _pendingAniListBrowserAuth = false
     }
 
     function clearMalSyncSession() {
@@ -439,6 +564,172 @@ Item {
         }
 
         return "MyAnimeList sync completed." + suffix
+    }
+
+    function _formatAniListSyncMessage(direction, summary) {
+        var info = summary || ({})
+        var updated = Number(info.updated || 0)
+        var imported = Number(info.imported || 0)
+        var removed = Number(info.removed || 0)
+        var skipped = Number(info.skipped || 0)
+        var failed = Number(info.failed || 0)
+        var suffix = ""
+        if (skipped > 0 || failed > 0) {
+            var parts = []
+            if (skipped > 0)
+                parts.push(String(skipped) + " skipped")
+            if (failed > 0)
+                parts.push(String(failed) + " failed")
+            suffix = " " + parts.join(", ") + "."
+        }
+
+        if (direction === "push") {
+            if (updated <= 0 && failed <= 0)
+                return "AniList is already in sync." + suffix
+            return "Pushed " + _entryCountLabel(updated) + " to AniList." + suffix
+        }
+
+        if (direction === "pull") {
+            if (updated <= 0 && imported <= 0 && failed <= 0)
+                return "AniList is already in sync." + suffix
+            if (updated > 0 && imported > 0)
+                return "Pulled " + _entryCountLabel(updated) + " and imported " + _entryCountLabel(imported) + " from AniList." + suffix
+            if (imported > 0)
+                return "Imported " + _entryCountLabel(imported) + " from AniList." + suffix
+            return "Pulled " + _entryCountLabel(updated) + " from AniList." + suffix
+        }
+
+        if (direction === "delete") {
+            if (removed <= 0 && failed <= 0)
+                return "AniList entry was not removed." + suffix
+            return "Removed " + _entryCountLabel(removed) + " from AniList." + suffix
+        }
+
+        return "AniList sync completed." + suffix
+    }
+
+    function _syncNotificationCommandLabel(command) {
+        var key = String(command || "").trim().toLowerCase()
+        if (key === "push")
+            return "Push"
+        if (key === "pull")
+            return "Pull"
+        if (key === "delete-entry" || key === "delete")
+            return "Removal"
+        if (key === "connect-token")
+            return "Connection"
+        if (key === "refresh")
+            return "Refresh"
+        if (key === "auth-url")
+            return "Login"
+        return "Sync"
+    }
+
+    function _syncNotificationFactLines(summary) {
+        var info = summary || ({})
+        var counts = [
+            { label: "Updated", value: Number(info.updated || 0) },
+            { label: "Imported", value: Number(info.imported || 0) },
+            { label: "Removed", value: Number(info.removed || 0) },
+            { label: "Skipped", value: Number(info.skipped || 0) },
+            { label: "Failed", value: Number(info.failed || 0) }
+        ]
+        var lines = []
+        for (var i = 0; i < counts.length; i++) {
+            var item = counts[i]
+            if (item.value > 0)
+                lines.push(item.label + ": " + String(item.value))
+        }
+        return lines
+    }
+
+    function _syncNotificationResultLine(result) {
+        var item = result || ({})
+        var title = String(item.title || item.id || "Untitled")
+        var reason = String(item.reason || "").trim()
+        var status = String(item.status || "").trim().toLowerCase()
+        if (reason.length > 0)
+            return title + ": " + reason
+        if (status === "updated")
+            return title + ": synced successfully."
+        if (status === "imported")
+            return title + ": imported into the local library."
+        if (status === "removed")
+            return title + ": removed successfully."
+        if (status === "unchanged")
+            return title + ": already aligned."
+        return title
+    }
+
+    function _syncNotificationBody(message, summary, results) {
+        var lines = []
+        var text = String(message || "").trim()
+        var factLines = _syncNotificationFactLines(summary)
+        var issues = (results || []).filter(function(item) {
+            var status = String((item || {}).status || "").trim().toLowerCase()
+            return status === "error" || status === "skipped"
+        }).slice(0, 5)
+        var successes = (results || []).filter(function(item) {
+            var status = String((item || {}).status || "").trim().toLowerCase()
+            return status === "updated" || status === "imported" || status === "removed"
+        }).slice(0, 3)
+
+        if (text.length > 0)
+            lines.push(text)
+        if (factLines.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines = lines.concat(factLines)
+        }
+        if (issues.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines.push("Issues:")
+            for (var i = 0; i < issues.length; i++)
+                lines.push("- " + _syncNotificationResultLine(issues[i]))
+        } else if (successes.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines.push("Recent changes:")
+            for (var j = 0; j < successes.length; j++)
+                lines.push("- " + _syncNotificationResultLine(successes[j]))
+        }
+
+        return lines.join("\n")
+    }
+
+    function _logSyncNotification(serviceName, command, message, summary, results, isError) {
+        var title = String(serviceName || "Sync") + " " + _syncNotificationCommandLabel(command)
+        var body = _syncNotificationBody(message, summary, results)
+        if (body.length === 0)
+            body = title
+        NotificationService.addToHistory({
+            id: "anime-reloaded-sync-" + String(Date.now()) + "-" + String(Math.random()).slice(2, 8),
+            summary: title,
+            summaryMarkdown: title,
+            body: body,
+            bodyMarkdown: body,
+            appName: "AnimeReloaded",
+            urgency: isError === true ? 2 : 1,
+            expireTimeout: 0,
+            timestamp: new Date(),
+            originalImage: "",
+            cachedImage: "",
+            actionsJson: "[]",
+            originalId: 0
+        })
+    }
+
+    function _showSyncFeedback(serviceName, command, message, summary, results, showToast, isError) {
+        if (!showToast)
+            return
+        ToastService.showNotice(
+            "AnimeReloaded",
+            String(message || ""),
+            "device-tv",
+            isError === true ? 4200 : 3200
+        )
+        _logSyncNotification(serviceName, command, message, summary, results, isError)
     }
 
     function _feedMediaId(item) {
@@ -584,12 +875,355 @@ Item {
         return String(show?.providerRefs?.metadata?.id || show?.id || "")
     }
 
+    function _showAniListMediaId(show) {
+        var metadataProvider = String(show?.providerRefs?.metadata?.provider || "")
+        var metadataId = String(show?.providerRefs?.metadata?.id || "")
+        if (metadataProvider === "anilist" && /^\d+$/.test(metadataId))
+            return metadataId
+        var showId = String(show?.id || "")
+        if (/^\d+$/.test(showId))
+            return showId
+        return ""
+    }
+
     function _showStreamProviderId(show) {
         return String(show?.providerRefs?.stream?.provider || streamProviderId || "allanime")
     }
 
     function _showTitle(show) {
         return String(show?.englishName || show?.name || "Untitled")
+    }
+
+    function _safeFileNamePart(value, fallback) {
+        var text = String(value || "").replace(/[<>:"/\\|?*\x00-\x1F]/g, " ")
+        text = text.replace(/\s+/g, " ").trim()
+        return text.length > 0 ? text : String(fallback || "Episode")
+    }
+
+    function _episodeDownloadFilePath(show, epNum) {
+        var title = _safeFileNamePart(_showTitle(show), "Anime")
+        var episode = _safeFileNamePart("Ep " + String(epNum || "?"), "Ep")
+        return _pathJoin(effectiveEpisodeDownloadPath, title + " - " + episode + ".mp4")
+    }
+
+    function _downloadHeaderString(headers) {
+        var lines = []
+        var map = headers || ({})
+        Object.keys(map).forEach(function(key) {
+            var name = String(key || "").trim()
+            var value = String(map[key] || "").trim()
+            if (name.length > 0 && value.length > 0)
+                lines.push(name + ": " + value)
+        })
+        return lines.length > 0 ? (lines.join("\r\n") + "\r\n") : ""
+    }
+
+    function _clearEpisodeDownloadState() {
+        isDownloadingEpisode = false
+        downloadingShowId = ""
+        downloadingEpisodeNumber = ""
+    }
+
+    function _downloadToast(message, duration) {
+        ToastService.showNotice(
+            "AnimeReloaded",
+            String(message || ""),
+            "device-tv",
+            duration === undefined ? 3200 : duration
+        )
+    }
+
+    function _downloadStatusId(showId, episodeNumber) {
+        return String(showId || "") + ":" + String(episodeNumber || "") + ":" + String(Date.now()) + ":" + String(Math.random()).slice(2, 8)
+    }
+
+    function _downloadStatusLabel(state) {
+        var key = String(state || "").toLowerCase()
+        if (key === "resolving")
+            return "Resolving"
+        if (key === "preparing")
+            return "Preparing"
+        if (key === "downloading")
+            return "Downloading"
+        if (key === "completed")
+            return "Completed"
+        if (key === "failed")
+            return "Failed"
+        return "Queued"
+    }
+
+    function _downloadStatusTone(state) {
+        var key = String(state || "").toLowerCase()
+        if (key === "failed")
+            return "error"
+        if (key === "completed")
+            return "success"
+        return "active"
+    }
+
+    function _isPendingDownloadState(state) {
+        var key = String(state || "").toLowerCase()
+        return key === "queued"
+            || key === "resolving"
+            || key === "preparing"
+            || key === "downloading"
+    }
+
+    function _findPendingEpisodeDownloadItem(showId, episodeNumber) {
+        var targetShowId = String(showId || "")
+        var targetEpisodeNumber = String(episodeNumber || "")
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems : []
+        for (var i = list.length - 1; i >= 0; i--) {
+            var item = list[i] || ({})
+            if (String(item.showId || "") !== targetShowId)
+                continue
+            if (String(item.episodeNumber || "") !== targetEpisodeNumber)
+                continue
+            if (_isPendingDownloadState(item.state))
+                return item
+        }
+        return null
+    }
+
+    function getEpisodeDownloadState(showId, episodeNumber) {
+        var item = _findPendingEpisodeDownloadItem(showId, episodeNumber)
+        return item ? String(item.state || "") : ""
+    }
+
+    function _isEpisodeDownloadProcessRunning() {
+        return episodeDownloadPrepareProc.running || episodeDownloadProc.running
+    }
+
+    function _resetEpisodeDownloadPrepareProc() {
+        episodeDownloadPrepareProc._statusId = ""
+        episodeDownloadPrepareProc._title = ""
+        episodeDownloadPrepareProc._episode = ""
+        episodeDownloadPrepareProc._directory = ""
+        episodeDownloadPrepareProc._finalPath = ""
+        episodeDownloadPrepareProc._tempPath = ""
+        episodeDownloadPrepareProc._link = ({})
+        episodeDownloadPrepareProc._stderrTail = ""
+    }
+
+    function _resetEpisodeDownloadProc() {
+        episodeDownloadProc._statusId = ""
+        episodeDownloadProc._title = ""
+        episodeDownloadProc._episode = ""
+        episodeDownloadProc._directory = ""
+        episodeDownloadProc._finalPath = ""
+        episodeDownloadProc._tempPath = ""
+        episodeDownloadProc._stderrTail = ""
+    }
+
+    function _releaseActiveEpisodeDownload(statusId) {
+        if (String(activeDownloadStatusId || "") === String(statusId || ""))
+            activeDownloadStatusId = ""
+        _clearEpisodeDownloadState()
+    }
+
+    function _startNextQueuedEpisodeDownload() {
+        if (String(activeDownloadStatusId || "").length > 0 || isDownloadingEpisode || _isEpisodeDownloadProcessRunning())
+            return
+        var queue = Array.isArray(episodeDownloadQueue) ? episodeDownloadQueue.slice() : []
+        if (queue.length === 0)
+            return
+        var nextJob = _deepClone(queue.shift() || {})
+        episodeDownloadQueue = queue
+        _startQueuedEpisodeDownload(nextJob)
+    }
+
+    function _startQueuedEpisodeDownload(job) {
+        var item = _deepClone(job || {})
+        var show = _deepClone(item.show || {})
+        var statusId = String(item.statusId || "")
+        var episodeNumber = String(item.episodeNumber || "")
+        var showId = String(item.showId || show?.id || "")
+        var title = String(item.title || _showTitle(show))
+        var targetDir = String(item.targetDir || effectiveEpisodeDownloadPath)
+        var targetPath = String(item.targetPath || _episodeDownloadFilePath(show, episodeNumber))
+
+        if (statusId.length === 0 || showId.length === 0 || episodeNumber.length === 0) {
+            _startNextQueuedEpisodeDownload()
+            return
+        }
+
+        activeDownloadStatusId = statusId
+        isDownloadingEpisode = true
+        downloadingShowId = showId
+        downloadingEpisodeNumber = episodeNumber
+
+        _setDownloadStatusState(
+            statusId,
+            "resolving",
+            "Looking up the best available source."
+        )
+
+        _downloadToast("Resolving " + title + " · Ep. " + episodeNumber + " for download.", 2200)
+
+        _resolveEpisodeStream(show, episodeNumber, function(err, d) {
+            if (String(root.activeDownloadStatusId || "") !== statusId)
+                return
+
+            if (err) {
+                root._setDownloadStatusState(
+                    statusId,
+                    "failed",
+                    String(err || "Could not resolve the episode stream."),
+                    { completedAt: Date.now() }
+                )
+                root._releaseActiveEpisodeDownload(statusId)
+                root._downloadToast("Download failed: " + err, 4200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+            if (!d || d.error || !d.url) {
+                root._setDownloadStatusState(
+                    statusId,
+                    "failed",
+                    String(d?.error || "No downloadable stream was returned."),
+                    { completedAt: Date.now() }
+                )
+                root._releaseActiveEpisodeDownload(statusId)
+                root._downloadToast("Download failed: " + String(d?.error || "No downloadable stream was returned."), 4200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            root._setDownloadStatusState(
+                statusId,
+                "preparing",
+                "Preparing the download folder."
+            )
+            episodeDownloadPrepareProc._statusId = statusId
+            episodeDownloadPrepareProc._title = title
+            episodeDownloadPrepareProc._episode = episodeNumber
+            episodeDownloadPrepareProc._directory = targetDir
+            episodeDownloadPrepareProc._finalPath = targetPath
+            episodeDownloadPrepareProc._tempPath = episodeDownloadPrepareProc._finalPath + ".part"
+            episodeDownloadPrepareProc._link = root._deepClone(d)
+            episodeDownloadPrepareProc._stderrTail = ""
+            episodeDownloadPrepareProc.command = ["mkdir", "-p", targetDir]
+            episodeDownloadPrepareProc.running = true
+        })
+    }
+
+    function _trimDownloadStatusItems(items) {
+        var list = Array.isArray(items) ? items.slice() : []
+        if (list.length <= 12)
+            return list
+        return list.slice(Math.max(0, list.length - 12))
+    }
+
+    function _addDownloadStatusItem(item) {
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        list.push(_deepClone(item))
+        downloadStatusItems = _trimDownloadStatusItems(list)
+    }
+
+    function _updateDownloadStatusItem(statusId, changes) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        for (var i = 0; i < list.length; i++) {
+            if (String((list[i] || {}).id || "") !== targetId)
+                continue
+            list[i] = Object.assign({}, list[i] || {}, _deepClone(changes || {}), {
+                updatedAt: Date.now()
+            })
+            downloadStatusItems = list
+            return
+        }
+    }
+
+    function _setDownloadStatusState(statusId, state, detail, extraChanges) {
+        _updateDownloadStatusItem(statusId, Object.assign({}, extraChanges || {}, {
+            state: String(state || ""),
+            stateLabel: _downloadStatusLabel(state),
+            tone: _downloadStatusTone(state),
+            detail: String(detail || "")
+        }))
+    }
+
+    function _removeDownloadStatusItem(statusId) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        for (var i = list.length - 1; i >= 0; i--) {
+            if (String((list[i] || {}).id || "") !== targetId)
+                continue
+            list.splice(i, 1)
+        }
+        downloadStatusItems = list
+    }
+
+    function clearCompletedDownloadStatus(statusId) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i] || ({})
+            if (String(item.id || "") !== targetId)
+                continue
+            if (String(item.state || "").toLowerCase() === "completed")
+                _removeDownloadStatusItem(targetId)
+            return
+        }
+    }
+
+    function cancelEpisodeDownloadStatus(statusId) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+
+        if (String(activeDownloadStatusId || "") === targetId) {
+            if (_isEpisodeDownloadProcessRunning()) {
+                cancellingDownloadStatusId = targetId
+                if (episodeDownloadProc.running)
+                    episodeDownloadProc.running = false
+                else if (episodeDownloadPrepareProc.running)
+                    episodeDownloadPrepareProc.running = false
+                return
+            }
+
+            _releaseActiveEpisodeDownload(targetId)
+            _removeDownloadStatusItem(targetId)
+            _downloadToast("Canceled episode download.", 2200)
+            _startNextQueuedEpisodeDownload()
+            return
+        }
+
+        var queue = Array.isArray(episodeDownloadQueue) ? episodeDownloadQueue.slice() : []
+        var removed = false
+        for (var i = queue.length - 1; i >= 0; i--) {
+            if (String((queue[i] || {}).statusId || "") !== targetId)
+                continue
+            queue.splice(i, 1)
+            removed = true
+        }
+        if (removed) {
+            episodeDownloadQueue = queue
+            _removeDownloadStatusItem(targetId)
+            _downloadToast("Removed from download queue.", 2200)
+        }
+    }
+
+    function openDownloadLocation(targetPath) {
+        var path = String(targetPath || "").trim()
+        if (path.length === 0)
+            return
+        openDownloadLocationProc._path = path
+        openDownloadLocationProc.command = [
+            "sh", "-c",
+            "command -v xdg-open >/dev/null 2>&1 || exit 127; " +
+            "target=\"$1\"; [ -n \"$target\" ] || exit 1; " +
+            "if [ -d \"$target\" ]; then xdg-open \"$target\"; else xdg-open \"$(dirname \"$target\")\"; fi",
+            "sh",
+            path
+        ]
+        openDownloadLocationProc.running = true
     }
 
     function _showMalId(show) {
@@ -868,6 +1502,8 @@ Item {
         if (key === "preferredProvider") preferredProvider = val
         if (key === "metadataProvider") metadataProviderId = val
         if (key === "streamProvider") streamProviderId = val
+        if (key === "episodeDownloadPath")
+            episodeDownloadPath = _normaliseDirectoryPath(val)
 
         if (key === "panelSize") {
             panelSize = val
@@ -877,7 +1513,7 @@ Item {
         }
         
         if (pluginApi) {
-            pluginApi.pluginSettings[key] = val
+            pluginApi.pluginSettings[key] = key === "episodeDownloadPath" ? episodeDownloadPath : val
             if (key === "panelSize" || key === "posterSize")
                 pluginApi.pluginSettings.posterSize = posterSize
             pluginApi.saveSettings()
@@ -927,6 +1563,17 @@ Item {
     property var    feedNotificationState: _emptyFeedNotificationState()
     property bool   _pendingStartupFeedToast: false
 
+    // ── AniList sync state ───────────────────────────────────────────────────
+    property bool   isAniListSyncBusy: false
+    property string aniListSyncError: ""
+    property string aniListSyncMessage: ""
+    property var    aniListSyncSummary: ({})
+    property var    aniListSyncResults: []
+    property string _pendingAniListCommand: ""
+    property bool   _pendingAniListShowsToast: true
+    property bool   _suppressAniListAutoPush: false
+    property bool   _pendingAniListBrowserAuth: false
+
     // ── MyAnimeList sync state ───────────────────────────────────────────────
     property bool   isMalSyncBusy: false
     property string malSyncError: ""
@@ -938,6 +1585,9 @@ Item {
     property bool   _suppressMalAutoPush: false
     property bool   _pendingMalBrowserAuth: false
     property string _pendingMalBrowserAuthUrl: ""
+
+    // ── Download status state ────────────────────────────────────────────────
+    property var    downloadStatusItems: []
 
     // ── Library view state ───────────────────────────────────────────────────
     property real libraryScrollY: 0
@@ -1015,6 +1665,13 @@ Item {
     }
 
     Timer {
+        id: aniListAutoPushTimer
+        interval: 1800
+        repeat: false
+        onTriggered: root.pushAniListSync(false)
+    }
+
+    Timer {
         id: malAutoPushTimer
         interval: 1800
         repeat: false
@@ -1027,9 +1684,21 @@ Item {
         mkdirProc.running = true
     }
 
+    function _aniListSyncReady() {
+        return aniListSync?.enabled === true
+            && String(aniListSync?.accessToken || "").length > 0
+    }
+
     function _malSyncReady() {
         return String(malSync?.backendSessionToken || "").length > 0
             && String(malSync?.userName || "").length > 0
+    }
+
+    function _queueAniListAutoPush() {
+        if (_suppressAniListAutoPush) return
+        if (!(aniListSync?.autoPush === true) || !_aniListSyncReady())
+            return
+        aniListAutoPushTimer.restart()
     }
 
     function _queueMalAutoPush() {
@@ -1100,8 +1769,10 @@ Item {
         pluginApi.saveSettings()
         feedLastFetchedAt = 0
         libraryVersion++  // trigger reactive re-evaluation in views
-        if (skipAutoSync !== true)
+        if (skipAutoSync !== true) {
+            _queueAniListAutoPush()
             _queueMalAutoPush()
+        }
     }
 
     function _loadLibrary() {
@@ -1788,6 +2459,16 @@ Item {
     // ── Utility processes ────────────────────────────────────────────────────
     Process { id: mkdirProc }
     Process { id: rmProc }
+    Process {
+        id: openDownloadLocationProc
+        property string _path: ""
+
+        onExited: function(exitCode) {
+            if (exitCode !== 0)
+                root._downloadToast("Could not open the download location.", 2600)
+            _path = ""
+        }
+    }
 
     // Writes forge cache to disk after CDN download
     Process {
@@ -1807,6 +2488,265 @@ Item {
         // Download directly via curl — keeps command tiny, no content in Process args
         forgeCacheWriteProc.command = ["curl", "-sL", "-o", cachePath, cdnUrl]
         forgeCacheWriteProc.running = true
+    }
+
+    Process {
+        id: episodeDownloadPrepareProc
+
+        property string _statusId: ""
+        property string _title: ""
+        property string _episode: ""
+        property string _directory: ""
+        property string _finalPath: ""
+        property string _tempPath: ""
+        property var _link: ({})
+        property string _stderrTail: ""
+
+        onExited: function(exitCode) {
+            if (String(root.cancellingDownloadStatusId || "") === String(_statusId || "")) {
+                var cancelledStatusId = String(_statusId || "")
+                root._removeDownloadStatusItem(cancelledStatusId)
+                root._releaseActiveEpisodeDownload(cancelledStatusId)
+                root.cancellingDownloadStatusId = ""
+                root._resetEpisodeDownloadPrepareProc()
+                root._downloadToast("Canceled episode download.", 2200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            if (exitCode !== 0) {
+                root._setDownloadStatusState(
+                    _statusId,
+                    "failed",
+                    String(_stderrTail || "Could not prepare the download folder."),
+                    { completedAt: Date.now() }
+                )
+                root._releaseActiveEpisodeDownload(_statusId)
+                root._downloadToast(
+                    "Download failed: " + String(_stderrTail || "Could not prepare the download folder."),
+                    4200
+                )
+                root._resetEpisodeDownloadPrepareProc()
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            var link = _link || ({})
+            var headers = root._deepClone(link.http_headers || {})
+            var referer = String(link.referer || headers.Referer || headers.Referrer || "")
+            var userAgent = String(headers["User-Agent"] || "Mozilla/5.0")
+            if (referer.length > 0)
+                headers.Referer = referer
+            headers["User-Agent"] = userAgent
+
+            episodeDownloadProc._statusId = _statusId
+            episodeDownloadProc._title = _title
+            episodeDownloadProc._episode = _episode
+            episodeDownloadProc._directory = _directory
+            episodeDownloadProc._finalPath = _finalPath
+            episodeDownloadProc._tempPath = _tempPath
+            episodeDownloadProc._stderrTail = ""
+
+            root._setDownloadStatusState(
+                _statusId,
+                "downloading",
+                "Saving to " + _finalPath
+            )
+
+            if (String(link.type || "").toLowerCase() === "hls") {
+                episodeDownloadProc.command = [
+                    "sh", "-c",
+                    "command -v ffmpeg >/dev/null 2>&1 || { printf 'ffmpeg is required for HLS downloads\\n' >&2; exit 127; }; " +
+                    "rm -f \"$4\"; trap 'rm -f \"$4\"' EXIT; " +
+                    "ffmpeg -y -nostdin -hide_banner -loglevel error -headers \"$1\" -i \"$2\" -c copy -bsf:a aac_adtstoasc \"$4\"; " +
+                    "mv -f \"$4\" \"$3\"",
+                    "sh",
+                    root._downloadHeaderString(headers),
+                    String(link.url || ""),
+                    _finalPath,
+                    _tempPath
+                ]
+            } else {
+                episodeDownloadProc.command = [
+                    "sh", "-c",
+                    "command -v curl >/dev/null 2>&1 || { printf 'curl is required for direct downloads\\n' >&2; exit 127; }; " +
+                    "rm -f \"$4\"; trap 'rm -f \"$4\"' EXIT; " +
+                    "curl -L --fail --silent --show-error --remove-on-error -A \"$1\" -e \"$2\" -o \"$4\" \"$5\"; " +
+                    "mv -f \"$4\" \"$3\"",
+                    "sh",
+                    userAgent,
+                    referer,
+                    _finalPath,
+                    _tempPath,
+                    String(link.url || "")
+                ]
+            }
+
+            root._downloadToast(
+                "Downloading " + _title + " · Ep. " + _episode + ".",
+                2200
+            )
+            episodeDownloadProc.running = true
+            root._resetEpisodeDownloadPrepareProc()
+        }
+
+        stderr: SplitParser {
+            onRead: function(data) {
+                var line = String(data || "").trim()
+                if (line.length > 0)
+                    episodeDownloadPrepareProc._stderrTail = line
+            }
+        }
+    }
+
+    Process {
+        id: episodeDownloadProc
+
+        property string _statusId: ""
+        property string _title: ""
+        property string _episode: ""
+        property string _directory: ""
+        property string _finalPath: ""
+        property string _tempPath: ""
+        property string _stderrTail: ""
+
+        onExited: function(exitCode) {
+            if (String(root.cancellingDownloadStatusId || "") === String(_statusId || "")) {
+                var cancelledStatusId = String(_statusId || "")
+                root._removeDownloadStatusItem(cancelledStatusId)
+                root._releaseActiveEpisodeDownload(cancelledStatusId)
+                root.cancellingDownloadStatusId = ""
+                root._resetEpisodeDownloadProc()
+                root._downloadToast("Canceled episode download.", 2200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            if (exitCode === 0) {
+                root._setDownloadStatusState(
+                    _statusId,
+                    "completed",
+                    "Saved to " + _finalPath,
+                    { completedAt: Date.now() }
+                )
+                root._downloadToast(
+                    "Downloaded " + _title + " · Ep. " + _episode + ".",
+                    3600
+                )
+            } else {
+                root._setDownloadStatusState(
+                    _statusId,
+                    "failed",
+                    String(_stderrTail || "The downloader exited with code " + exitCode + "."),
+                    { completedAt: Date.now() }
+                )
+                root._downloadToast(
+                    "Download failed: " + String(_stderrTail || "The downloader exited with code " + exitCode + "."),
+                    4200
+                )
+            }
+
+            root._releaseActiveEpisodeDownload(_statusId)
+            root._resetEpisodeDownloadProc()
+            root._startNextQueuedEpisodeDownload()
+        }
+
+        stderr: SplitParser {
+            onRead: function(data) {
+                var line = String(data || "").trim()
+                if (line.length === 0)
+                    return
+                episodeDownloadProc._stderrTail = line
+                Logger.w("AnimeReloaded", "download:", line)
+            }
+        }
+    }
+
+    // ── AniList sync result handler ──────────────────────────────────────────
+    function _handleAniListSyncResult(command, d) {
+        if (d.config)
+            root.updateAniListSyncConfig(d.config)
+        root.aniListSyncSummary = d.summary || ({})
+        root.aniListSyncResults = Array.isArray(d.results) ? d.results : []
+        if ((command === "pull" || command === "push") && Array.isArray(d.library)) {
+            root._suppressAniListAutoPush = true
+            root.libraryList = d.library.map(function(entry) {
+                return root._normaliseLibraryEntry(entry)
+            })
+            root._saveLibrary(true)
+            root._suppressAniListAutoPush = false
+            if (command === "pull")
+                root.fetchFollowingFeed(true)
+        }
+
+        var summary = d.summary || ({})
+        if (command === "auth-url" && d.authUrl) {
+            root.aniListSyncMessage = "Opened AniList authorization in the browser. Paste the returned callback URL or access token to finish."
+            Qt.openUrlExternally(d.authUrl)
+        } else if (command === "connect-token") {
+            root._pendingAniListBrowserAuth = false
+            root.aniListAuthDraft = ""
+            root.aniListSyncMessage = "Connected to AniList as " + String(((d || {}).user || {}).name || root.aniListSync.userName || "your account") + "."
+        } else if (command === "refresh") {
+            root.aniListSyncMessage = "Refreshed AniList session."
+        } else if (command === "delete-entry") {
+            var removedTitle = String((d && d.results && d.results.length > 0 ? d.results[0].title : "") || "")
+            root.aniListSyncMessage = removedTitle.length > 0
+                ? ("Removed " + removedTitle + " from AniList.")
+                : root._formatAniListSyncMessage("delete", summary)
+        } else if (command === "push") {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("push", summary)
+        } else if (command === "pull") {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("pull", summary)
+        } else {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("", summary)
+        }
+        root.aniListSyncError = ""
+
+        _showSyncFeedback("AniList", command, root.aniListSyncMessage, summary, root.aniListSyncResults, root._pendingAniListShowsToast, false)
+        root._pendingAniListCommand = ""
+    }
+
+    function _queueAniListCommandJS(command, includeLibrary, extraArgs, showToast) {
+        _pendingAniListCommand = String(command || "")
+        _pendingAniListShowsToast = showToast !== false
+        aniListSyncError = ""
+        aniListSyncMessage = ""
+
+        var config = _normaliseAniListSync(aniListSync)
+        var aniListArgs = { config: config }
+
+        if (includeLibrary)
+            aniListArgs.libraryEntries = libraryList || []
+        if (command === "connect-token")
+            aniListArgs.authResult = (extraArgs || [])[0] || ""
+        if (command === "delete-entry") {
+            aniListArgs.mediaId = (extraArgs || [])[0] || ""
+            aniListArgs.title = (extraArgs || [])[1] || ""
+        }
+
+        isAniListSyncBusy = true
+
+        Providers.sync("anilist", command, aniListArgs, function(err, d) {
+            isAniListSyncBusy = false
+            if (err) {
+                root.aniListSyncError = String(err)
+                root.aniListSyncMessage = ""
+                _showSyncFeedback("AniList", command, root.aniListSyncError, {}, [], root._pendingAniListShowsToast, true)
+                root._pendingAniListCommand = ""
+                if (command === "auth-url")
+                    root._pendingAniListBrowserAuth = false
+                return
+            }
+            if (!d) {
+                root.aniListSyncError = "AniList command did not return any data."
+                root.aniListSyncMessage = ""
+                _showSyncFeedback("AniList", command, root.aniListSyncError, {}, [], root._pendingAniListShowsToast, true)
+                root._pendingAniListCommand = ""
+                return
+            }
+            _handleAniListSyncResult(command, d)
+        })
     }
 
     // ── MAL sync result handler ──────────────────────────────────────────────
@@ -1851,14 +2791,7 @@ Item {
         }
         root.malSyncError = ""
 
-        if (root._pendingMalShowsToast) {
-            ToastService.showNotice(
-                "AnimeReloaded",
-                root.malSyncMessage,
-                "device-tv",
-                3200
-            )
-        }
+        _showSyncFeedback("MyAnimeList", command, root.malSyncMessage, summary, root.malSyncResults, root._pendingMalShowsToast, false)
         root._pendingMalCommand = ""
     }
 
@@ -1887,6 +2820,7 @@ Item {
             if (err) {
                 root.malSyncError = String(err)
                 root.malSyncMessage = ""
+                _showSyncFeedback("MyAnimeList", command, root.malSyncError, {}, [], root._pendingMalShowsToast, true)
                 root._pendingMalCommand = ""
                 root._pendingMalBrowserAuth = false
                 root._pendingMalBrowserAuthUrl = ""
@@ -1895,6 +2829,7 @@ Item {
             if (!d) {
                 root.malSyncError = "MyAnimeList command did not return any data."
                 root.malSyncMessage = ""
+                _showSyncFeedback("MyAnimeList", command, root.malSyncError, {}, [], root._pendingMalShowsToast, true)
                 root._pendingMalCommand = ""
                 return
             }
@@ -1925,7 +2860,7 @@ Item {
             if (d.config) root.updateMalSyncConfig(d.config)
             root.malSyncMessage = "Connected to MyAnimeList as " + String(((d || {}).user || {}).name || root.malSync.userName || "your account") + "."
             root.malSyncError = ""
-            ToastService.showNotice("AnimeReloaded", root.malSyncMessage, "device-tv", 3200)
+            _showSyncFeedback("MyAnimeList", "connect-token", root.malSyncMessage, {}, [], true, false)
         })
 
         Qt.callLater(function() { Qt.openUrlExternally(authUrl) })
@@ -1963,6 +2898,69 @@ Item {
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
+    function startAniListBrowserAuth() {
+        if (String(aniListSync?.clientId || "").trim().length === 0) {
+            aniListSyncError = "Enter your AniList client id before starting browser login."
+            return
+        }
+        _pendingAniListBrowserAuth = true
+        aniListSyncError = ""
+        aniListSyncMessage = "Opening AniList sign-in..."
+        _queueAniListCommandJS("auth-url", false, [], false)
+    }
+
+    function completeAniListBrowserAuth(authResult, showToast) {
+        if (String(authResult || "").trim().length === 0) {
+            aniListSyncError = "Paste the AniList callback URL or access token first."
+            return
+        }
+        aniListSyncError = ""
+        aniListSyncMessage = "Finishing AniList sign-in..."
+        _queueAniListCommandJS("connect-token", false, [authResult], showToast !== false)
+    }
+
+    function refreshAniListSyncSession(showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect an AniList account before refreshing."
+            return
+        }
+        _queueAniListCommandJS("refresh", false, [], showToast !== false)
+    }
+
+    function pushAniListSync(showToast) {
+        if ((libraryList || []).length === 0) {
+            aniListSyncError = "Your library is empty."
+            return
+        }
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before pushing library progress."
+            return
+        }
+        _queueAniListCommandJS("push", true, [], showToast !== false)
+    }
+
+    function pullAniListSync(showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before pulling progress."
+            return
+        }
+        _queueAniListCommandJS("pull", true, [], showToast !== false)
+    }
+
+    function removeShowFromAniList(show, showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before removing titles from your AniList list."
+            return
+        }
+        var mediaId = _showAniListMediaId(show)
+        if (mediaId.length === 0) {
+            aniListSyncError = "No AniList media id is available for this title."
+            return
+        }
+        var title = String(show?.englishName || show?.name || "")
+        _queueAniListCommandJS("delete-entry", false, [mediaId, title], showToast !== false)
+    }
+
     function startMalBrowserAuth() {
         if (String(malSync?.backendUrl || "").trim().length === 0) {
             malSyncError = "The MyAnimeList backend URL is not configured."
@@ -2223,6 +3221,23 @@ Item {
         pendingAutoPlayShowId = ""
     }
 
+    function _resolveEpisodeStream(show, epNum, callback) {
+        if (!show) {
+            callback("No anime is selected.")
+            return
+        }
+        var showStreamProvider = _showStreamProviderId(show)
+        Providers.stream(showStreamProvider, "resolve", {
+            showId: _showMetadataId(show),
+            episodeNumber: String(epNum || ""),
+            mode: currentMode,
+            mirrorPref: preferredProvider,
+            qualityPref: "best",
+            title: _showTitle(show),
+            metadataProviderId: _showMetadataProviderId(show)
+        }, callback)
+    }
+
     function fetchStreamLinks(showId, epId, epNum) {
         if (!currentAnime) return
         _playingShowId  = showId
@@ -2233,21 +3248,76 @@ Item {
         playbackError   = ""
         selectedLink    = null
         isFetchingLinks = true
-        var showStreamProvider = _showStreamProviderId(currentAnime)
-        Providers.stream(showStreamProvider, "resolve", {
-            showId: _showMetadataId(currentAnime),
-            episodeNumber: String(epNum || ""),
-            mode: currentMode,
-            mirrorPref: preferredProvider,
-            qualityPref: "best",
-            title: _showTitle(currentAnime),
-            metadataProviderId: _showMetadataProviderId(currentAnime)
-        }, function(err, d) {
+        _resolveEpisodeStream(currentAnime, epNum, function(err, d) {
             isFetchingLinks = false
             if (err) { linksError = err; return }
             if (d && d.error) { linksError = d.error; return }
             selectedLink = d
         })
+    }
+
+    function downloadEpisode(show, epNum) {
+        if (!show)
+            return
+
+        var targetDir = effectiveEpisodeDownloadPath
+        if (targetDir.length === 0) {
+            _downloadToast("Choose a download folder before downloading episodes.", 3200)
+            return
+        }
+
+        var episodeNumber = String(epNum || "")
+        var showId = String(show?.id || "")
+        var title = _showTitle(show)
+        var existingItem = _findPendingEpisodeDownloadItem(showId, episodeNumber)
+        if (existingItem) {
+            var existingState = String(existingItem.state || "").toLowerCase()
+            _downloadToast(
+                existingState === "queued"
+                    ? "This episode is already waiting in the download queue."
+                    : "This episode is already being downloaded.",
+                2600
+            )
+            return
+        }
+
+        var statusId = _downloadStatusId(showId, episodeNumber)
+        var targetPath = _episodeDownloadFilePath(show, episodeNumber)
+        var job = {
+            id: statusId,
+            statusId: statusId,
+            showId: showId,
+            show: _deepClone(show),
+            episodeNumber: episodeNumber,
+            title: title,
+            targetDir: targetDir,
+            targetPath: targetPath,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            completedAt: 0
+        }
+
+        if (String(activeDownloadStatusId || "").length > 0 || isDownloadingEpisode || _isEpisodeDownloadProcessRunning()) {
+            _addDownloadStatusItem(Object.assign({}, job, {
+                state: "queued",
+                stateLabel: _downloadStatusLabel("queued"),
+                tone: _downloadStatusTone("queued"),
+                detail: "Waiting for the previous download to complete."
+            }))
+            var queue = Array.isArray(episodeDownloadQueue) ? episodeDownloadQueue.slice() : []
+            queue.push(job)
+            episodeDownloadQueue = queue
+            _downloadToast("Queued " + title + " · Ep. " + episodeNumber + ".", 2200)
+            return
+        }
+
+        _addDownloadStatusItem(Object.assign({}, job, {
+            state: "resolving",
+            stateLabel: _downloadStatusLabel("resolving"),
+            tone: _downloadStatusTone("resolving"),
+            detail: "Looking up the best available source."
+        }))
+        _startQueuedEpisodeDownload(job)
     }
 
     function clearStreamLinks() {

@@ -1,4 +1,5 @@
 import QtQuick
+import QtCore
 import QtQuick.Layouts
 import qs.Commons
 import qs.Widgets
@@ -55,12 +56,64 @@ ColumnLayout {
         return "#" + toHex(color.r) + toHex(color.g) + toHex(color.b)
     }
 
+    function _localPathFromUrl(value) {
+        var text = String(value || "").trim()
+        if (text.indexOf("file://localhost/") === 0)
+            text = text.substring("file://localhost".length)
+        else if (text.indexOf("file://") === 0)
+            text = text.substring("file://".length)
+        return decodeURIComponent(text)
+    }
+
+    function _normaliseDirectoryPath(value) {
+        var text = String(value || "").trim()
+        if (text.length === 0)
+            return ""
+        if (text.indexOf("file://") === 0)
+            text = _localPathFromUrl(text)
+        text = text.replace(/\/+$/, "")
+        if (text.length === 0)
+            return "/"
+        return text
+    }
+
+    function _pathJoin(base, child) {
+        if (!base || base.length === 0)
+            return child || ""
+        if (!child || child.length === 0)
+            return base
+        if (base.endsWith("/"))
+            return base + child
+        return base + "/" + child
+    }
+
+    function _defaultDownloadsRoot() {
+        var locations = StandardPaths.standardLocations(StandardPaths.DownloadLocation)
+        if (locations && locations.length > 0 && String(locations[0] || "").length > 0)
+            return String(locations[0])
+        var home = String(StandardPaths.writableLocation(StandardPaths.HomeLocation) || "")
+        return home.length > 0 ? _pathJoin(home, "Downloads") : ""
+    }
+
+    function _defaultEpisodeDownloadPath() {
+        var base = _normaliseDirectoryPath(_defaultDownloadsRoot())
+        return base.length > 0 ? _pathJoin(base, "AnimeReloaded") : ""
+    }
+
     property string barWidgetIconName:
         _settingValue("barWidgetIconName", defaults.barWidgetIconName || "device-tv")
     property string barWidgetText:
         _settingValue("barWidgetText", defaults.barWidgetText || "AnimeReloaded")
     property string barWidgetIconColor:
         _normaliseIconColorKey(_settingValue("barWidgetIconColor", defaults.barWidgetIconColor || "primary"))
+    property string episodeDownloadPath:
+        String(_settingValue("episodeDownloadPath", ""))
+    readonly property string defaultEpisodeDownloadPath:
+        _defaultEpisodeDownloadPath()
+    readonly property string effectiveEpisodeDownloadPath:
+        _normaliseDirectoryPath(root.episodeDownloadPath).length > 0
+            ? _normaliseDirectoryPath(root.episodeDownloadPath)
+            : defaultEpisodeDownloadPath
 
     readonly property var colorOptions: Color.colorKeyModel
 
@@ -68,6 +121,7 @@ ColumnLayout {
         root.barWidgetIconName = defaults.barWidgetIconName || "device-tv"
         root.barWidgetText = defaults.barWidgetText || "AnimeReloaded"
         root.barWidgetIconColor = _normaliseIconColorKey(defaults.barWidgetIconColor || "primary")
+        root.episodeDownloadPath = ""
     }
 
     spacing: Style.marginL
@@ -226,6 +280,60 @@ ColumnLayout {
         pointSize: Style.fontSizeS
     }
 
+    NLabel {
+        label: "Episode Downloads"
+        description: "Choose where downloaded episodes will be saved. Leave it empty to use the default AnimeReloaded downloads folder."
+    }
+
+    NTextInput {
+        Layout.fillWidth: true
+        label: "Download Folder"
+        description: "Custom folder for episode downloads."
+        placeholderText: root.defaultEpisodeDownloadPath
+        text: root.episodeDownloadPath
+        onTextChanged: root.episodeDownloadPath = text
+    }
+
+    NText {
+        Layout.fillWidth: true
+        text: "Current location: " + root.effectiveEpisodeDownloadPath
+        color: Color.mOnSurfaceVariant
+        pointSize: Style.fontSizeS
+        wrapMode: Text.Wrap
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.marginM
+
+        NButton {
+            text: "Choose Folder"
+            onClicked: downloadFolderPicker.openFilePicker()
+        }
+
+        NButton {
+            text: "Use Default"
+            visible: root._normaliseDirectoryPath(root.episodeDownloadPath).length > 0
+            onClicked: root.episodeDownloadPath = ""
+        }
+
+        Item {
+            Layout.fillWidth: true
+        }
+    }
+
+    NFilePicker {
+        id: downloadFolderPicker
+        title: "Select episode download folder"
+        initialPath: root.effectiveEpisodeDownloadPath
+        selectionMode: "folders"
+
+        onAccepted: function(paths) {
+            if (paths.length > 0)
+                root.episodeDownloadPath = root._normaliseDirectoryPath(paths[0])
+        }
+    }
+
     RowLayout {
         Layout.fillWidth: true
 
@@ -249,6 +357,7 @@ ColumnLayout {
         pluginApi.pluginSettings.barWidgetIconName = root.barWidgetIconName
         pluginApi.pluginSettings.barWidgetText = root.barWidgetText
         pluginApi.pluginSettings.barWidgetIconColor = root._normaliseIconColorKey(root.barWidgetIconColor)
+        pluginApi.pluginSettings.episodeDownloadPath = root._normaliseDirectoryPath(root.episodeDownloadPath)
         pluginApi.saveSettings()
     }
 }

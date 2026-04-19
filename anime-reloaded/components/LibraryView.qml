@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Qt5Compat.GraphicalEffects
 import qs.Commons
 import qs.Widgets
 
@@ -894,7 +895,24 @@ Item {
                                 radius: 10
                                 color: "transparent"
                                 clip: true
-                                 // OpacityMask removed — parent clip: true + radius handles rounding
+                                layer.enabled: true
+                                layer.effect: OpacityMask {
+                                    maskSource: Item {
+                                        width: libImageWrapper.width
+                                        height: libImageWrapper.height
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: libImageWrapper.radius
+                                            color: _themeColor("mOnSurface", Color.mOnSurface)
+                                        }
+
+                                        Rectangle {
+                                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                            height: libImageWrapper.radius
+                                            color: _themeColor("mOnSurface", Color.mOnSurface)
+                                        }
+                                    }
+                                }
 
                                 Image {
                                     id: libCover
@@ -1014,6 +1032,7 @@ Item {
                                 anchors { bottom: libEpBar.top; left: parent.left; right: parent.right }
                                 height: libTitleText.implicitHeight + 10
                                 color: Color.mSurfaceVariant
+                                radius: 0
 
                                 Text {
                                     id: libTitleText
